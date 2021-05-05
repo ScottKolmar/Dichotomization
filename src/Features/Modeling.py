@@ -50,11 +50,9 @@ class DataSet():
         csv (CSV): Descriptor file to load.
         sample_size (int): Number of entries to sample from the dataset.
         num_random_var (int): Number of random variables to select. If False, all data will be selected. (Default = False)
+        num_noise_levels (int): Number of noise levels to generate. (Default = 10)
+        test_set (str): Can be 'True' or 'Noise'. Determines whether the test set for modeling will have noise or not. (Default = 'True')
 
-        :param csv:
-        :param sample_size:
-        :param random:
-        :param num_noise_levels:
         :return:
         """
 
@@ -82,9 +80,13 @@ class DataSet():
         # Select X variables
         if not num_random_var:
             self.X = self.df.iloc[:, :-1]
+            self.num_features = len(X.columns)
+            self.features = X.columns
         elif num_random_var:
             feature = random_x(self.df, num_random_var)
             self.X = self.df.loc[:, feature]
+            self.num_features = len(X.columns)
+            self.features = X.columns
 
 
         # Select y variables
