@@ -53,6 +53,71 @@ def getFileString(file):
 
     return pngstring
 
+def scoreDFs(subdir = None, file = None, df_score_dict = None):
+    """
+    Appends score information from PKL file to empty score dataframes.
+
+    Parameters:
+         subdir ():
+         file ():
+         df_score_dict ():
+
+    Returns:
+        600
+
+    """
+
+    # Load pickle from OS path
+    BA = pickle.load(open(os.path.join(subdir, file), 'rb'))
+    scores = BA[1]
+
+    for key in scores.keys():
+        clfs = scores[key][0]['Clfs']
+        rgrs = scores[key][1]['Rgrs']
+
+        # Get averages and stds
+        clf_ave = np.average(clfs)
+        clf_std = np.std(clfs)
+        rgr_ave = np.average(rgrs)
+        rgr_std = np.std(rgrs)
+
+        # Load meta and assign values to variables
+        meta = BA[0]
+        algorithm = meta['Algorithm']
+        noise = meta['Noise Level']
+        sigma = meta['Sigma']
+        perc = meta['Percentile']
+        testset = meta['Test Set']
+        splitting = meta['Splitting']
+
+        # Make new dictionaries out of meta dictionary
+        clf_data = {'Algorithm': [algorithm],
+                    'Noise': [noise],
+                    'Testset': [testset],
+                    'Splitting': [splitting],
+                    'Sigma': [sigma],
+                    'Percentile': [perc],
+                    'Average': [clf_ave],
+                    'Std': [clf_std]}
+        rgr_data = {'Algorithm': [algorithm],
+                    'Noise': [noise],
+                    'Testset': [testset],
+                    'Splitting': [splitting],
+                    'Sigma': [sigma],
+                    'Percentile': [perc],
+                    'Average': [rgr_ave],
+                    'Std': [rgr_std]}
+
+        # Convert to rows in new dataframes
+        clf_data_df = pd.DataFrame.from_dict(data=clf_data, orient='columns')
+        rgr_data_df = pd.DataFrame.from_dict(data=rgr_data, orient='columns')
+
+        # Append rows to prior dataframes
+        df_score_dict[key][0] = df_score_dict[key][0].append(clf_data_df, ignore_index = True)
+        df_score_dict[key][1] = df_score_dict[key][1].append(rgr_data_df, ignore_index=True)
+
+    return df_score_dict
+
 def loopCols(y_cols_df=None, y_true_class=None, perc = None, sumdict=None):
     """
     For a single cutpoint, loops through each noise columns in a dataframe of noise columns, generates a pandas series
@@ -61,11 +126,11 @@ def loopCols(y_cols_df=None, y_true_class=None, perc = None, sumdict=None):
     and the Series' are made into a dataframe with noise levels as columns.
 
     Parameters:
-        y_cols_df (dataframe): Pandas dataframe containing the data with added noise. (Default = None).
-        y_true_class (Series): Pandas series containing true class values. (Default = None).
-        perc (int): Percentile for cutpoint. (Default = None).
+        y_cols_df (dataframe): Pandas dataframe containing the data with added noise. (Default = 600).
+        y_true_class (Series): Pandas series containing true class values. (Default = 600).
+        perc (int): Percentile for cutpoint. (Default = 600).
         sumdict (dict): Dictionary of boolean sums. Each key is a noise level and each entry
-                        is the boolean sum for cutpoints (10 through 90). (Default = None)
+                        is the boolean sum for cutpoints (10 through 90). (Default = 600)
 
     Returns:
         bool_df (dataframe): Pandas dataframe containing booleans for matching y_true_class.
@@ -326,11 +391,11 @@ def plot2D(rootdir = None, metasearch = None):
     the PKL files used stratifiedKFold CV, and the parameter should be False if the PKL files used KFold CV.
 
     Parameters:
-        rootdir (str): Absolute path to root directory for PKL files for a dataset. (Default = None).
+        rootdir (str): Absolute path to root directory for PKL files for a dataset. (Default = 600).
         metasearch (dict): Meta dictionary to filter desired files.
 
     Returns:
-        None
+        600
 
     """
     # Define empty classifier and regressor dataframes
@@ -431,10 +496,10 @@ def plot3D(rootdir=None, alg=None):
 
     Parameters:
         rootdir (str): Absolute path to the parent directory for the PKL files.
-        alg (str): Algorithm to pull data from for the plot. (Default = None).
+        alg (str): Algorithm to pull data from for the plot. (Default = 600).
 
     Returns:
-        None
+        600
 
     """
     columns = ['Noise', 'Sigma', 'Percentile', 'Average', 'Std']
