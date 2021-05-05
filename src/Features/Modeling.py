@@ -134,6 +134,7 @@ def scoreDFs(subdir = None, file = None, df_score_dict = None):
 
         # Load meta and assign values to variables
         meta = BA[0]
+        algorithm = meta['Algorithm']
         noise = meta['Noise Level']
         sigma = meta['Sigma']
         perc = meta['Percentile']
@@ -141,14 +142,16 @@ def scoreDFs(subdir = None, file = None, df_score_dict = None):
         splitting = meta['Splitting']
 
         # Make new dictionaries out of meta dictionary
-        clf_data = {'Noise': [noise],
+        clf_data = {'Algorithm': [algorithm],
+                    'Noise': [noise],
                     'Testset': [testset],
                     'Splitting': [splitting],
                     'Sigma': [sigma],
                     'Percentile': [perc],
                     'Average': [clf_ave],
                     'Std': [clf_std]}
-        rgr_data = {'Noise': [noise],
+        rgr_data = {'Algorithm': [algorithm],
+                    'Noise': [noise],
                     'Testset': [testset],
                     'Splitting': [splitting],
                     'Sigma': [sigma],
