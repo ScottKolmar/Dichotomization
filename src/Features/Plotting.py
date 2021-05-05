@@ -54,7 +54,7 @@ class scoreSheet():
             self.__getattribute__(str(key))['clf'] = self.__getattribute__(str(key))['clf'].append(clf_data, ignore_index=True)
             self.__getattribute__(str(key))['rgr'] = self.__getattribute__(str(key))['rgr'].append(rgr_data, ignore_index=True)
 
-def plotObjects2D(rootdir, search_dict = None):
+def plot_scores(rootdir, search_dict = None):
     """
 
     Parameters:
@@ -76,10 +76,9 @@ def plotObjects2D(rootdir, search_dict = None):
     for subdir, dirs, files in os.walk(rootdir):
         for file in files:
             pklfile = os.path.join(subdir, file)
-            sheet.loadScores2(pklfile)
+            sheet.load_scores(pklfile)
 
     # Filtering
-
     for key in vars(sheet).keys():
         df_clf = sheet.__getattribute__(str(key))['clf']
         df_rgr = sheet.__getattribute__(str(key))['rgr']
@@ -90,41 +89,47 @@ def plotObjects2D(rootdir, search_dict = None):
         else:
             pass
 
-        # Make figure
-        fig = plt.figure()
-        plt.errorbar(x=df_clf['Percentile'], y=df_clf['Average'], yerr=df_clf['Std'], label='Clf')
-        plt.errorbar(x=df_rgr['Percentile'], y=df_rgr['Average'], yerr=df_rgr['Std'], label='Rgr')
-        plt.legend()
-        plt.xlabel('Percentile')
-        plt.ylabel(key)
-        plt.title(str(df_clf['Algorithm'][0]) + ' ' + str(df_clf['Noise Level'][0]))
+        # Print error statement if empty df
+        if df_clf.empty:
+            print('Filtering has produced an empty classifier dataframe.')
+        elif df_rgr.empty:
+            print('Filtering has produced an empty regressor dataframe.')
+        else:
+            # Make figure
+            fig = plt.figure()
+            plt.errorbar(x=df_clf['Percentile'], y=df_clf['Average'], yerr=df_clf['Std'], label='Clf')
+            plt.errorbar(x=df_rgr['Percentile'], y=df_rgr['Average'], yerr=df_rgr['Std'], label='Rgr')
+            plt.legend()
+            plt.xlabel('Percentile')
+            plt.ylabel(key)
+            plt.title(str(df_clf['Algorithm'][0]) + ' ' + str(df_clf['Noise Level'][0]))
 
-        # Define directory path for PNG file from PKL file path
-        pngparent = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PNG'
-        dataset = str(df_clf['Dataset'][0])
-        testset = str(df_clf['Test Set'][0])
-        splitting = str(df_clf['Splitting'][0])
-        sample_size = str(df_clf['Sample Size'][0])
-        noise = str(df_clf['Noise Level'][0])
-        pngfoldpath = os.path.join(pngparent, dataset, testset, splitting, sample_size, noise)
+            # Define directory path for PNG file from PKL file path
+            pngparent = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PNG'
+            dataset = str(df_clf['Dataset'][0])
+            testset = str(df_clf['Test Set'][0])
+            splitting = str(df_clf['Splitting'][0])
+            sample_size = str(df_clf['Sample Size'][0])
+            noise = str(df_clf['Noise Level'][0])
+            pngfoldpath = os.path.join(pngparent, dataset, testset, splitting, sample_size, noise)
 
-        # Make directory paths if they don't exist
-        if not os.path.exists(pngfoldpath):
-            os.makedirs(pngfoldpath)
+            # Make directory paths if they don't exist
+            if not os.path.exists(pngfoldpath):
+                os.makedirs(pngfoldpath)
 
-        # Define filename
-        pngfilename = '{}_{}_{}_{}_{}_{}_{}_{}.png'.format(dataset,
-                                                           testset,
-                                                           splitting,
-                                                           sample_size,
-                                                           noise,
-                                                           df_clf['K Folds'][0],
-                                                           df_clf['Score Name'][0],
-                                                           df_clf['Algorithm'][0])
+            # Define filename
+            pngfilename = '{}_{}_{}_{}_{}_{}_{}_{}.png'.format(dataset,
+                                                               testset,
+                                                               splitting,
+                                                               sample_size,
+                                                               noise,
+                                                               df_clf['K Folds'][0],
+                                                               df_clf['Score Name'][0],
+                                                               df_clf['Algorithm'][0])
 
-        # Save figure as PNG
-        #plt.savefig(os.path.join(pngfoldpath, pngfilename))
-        #plt.close(fig=fig)
+            # Save figure as PNG
+            plt.savefig(os.path.join(pngfoldpath, pngfilename))
+            plt.close(fig=fig)
 
     return sheet
 
