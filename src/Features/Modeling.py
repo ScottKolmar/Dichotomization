@@ -3,10 +3,13 @@ import numpy as np
 import pandas as pd
 import pickle
 import os
+from itertools import compress
+import random
 
 # Import sklearn
 from scipy.stats.stats import pearsonr, ttest_ind
 from sklearn.model_selection import StratifiedKFold, KFold
+from sklearn.feature_selection import VarianceThreshold
 from sklearn.metrics import balanced_accuracy_score
 from sklearn.metrics import f1_score
 from sklearn.metrics import roc_auc_score
@@ -34,12 +37,94 @@ def twobinner(y = None, thresh = None):
     else:
         return 0
 
+class dataSet():
+
+    def __init__(self, csv):
+        self.csv  = csv
+
+    def loadDF(self, sample_size = None, num_random_var = False, num_noise_levels = 10):
+        """
+        Loads instance variables for a dataSheet instance.
+
+        Parameters:
+        csv (CSV): Descriptor file to load.
+        sample_size (int): Number of entries to sample from the dataset.
+        num_random_var (int): Number of random variables to select. If False, all data will be selected. (Default = False)
+
+        :param csv:
+        :param sample_size:
+        :param random:
+        :param num_noise_levels:
+        :return:
+        """
+
+        # Load CSV into df variable
+        self.df = pd.read_csv(filepath_or_buffer=self.csv, index_col=0)
+
+        # Set name variable
+        self.name = self.csv.split('.')[0].split('_')[0].split('\\')[6]
+
+        # Sample the dataframe
+        try:
+            self.df = self.df.sample(sample_size)
+        except ValueError:
+            print('The sample_size must be smaller than the size of the dataset, which is: {}'.format(df.shape[0]))
+
+        # Set sample_size variable, which should come after try block in case of failure
+        self.sample_size = sample_size
+
+        # Drop Infs
+        self.df = dropInfs(self.df)
+
+        # Select X variables
+        if not num_random_var:
+            self.X = self.df.iloc[:, :-1]
+        elif num_random_var:
+            feature = randomX(df, num_random_var)
+            self.X = self.df.loc[feature, :-1]
+
+
+        # Select y variables
+        self.y_true = self.df.iloc[:, -1]
+
+        # Sample noise and add to variable
+        self.y_dict = sampleNoise(y = self.y_true, num_levels = num_noise_levels)
+
+        return None
+
+
+
+def randomX(df, num):
+    """
+    Selects a random X variable Series from a dataframe and returns that Series. Filters for variables with variance
+    larger than 0.99.
+
+    Parameters:
+    df (dataframe): Dataframe to select from.
+    num (int): Number of features to randomly select.
+
+    :return:
+    """
+    # Identify X variable columns
+    X_Vars = df.iloc[:, :-1]
+
+    # Set variance threshold and filter the X variables
+    var = VarianceThreshold(threshold=0.99)
+    var.fit_transform(X_Vars)
+
+    # Select a random variable from the filtered X variable list
+    columns = list(X_Vars.columns)
+    feat_list = list(compress(columns, var.get_support()))
+    feature = random.sample(feat_list, num)
+
+    return feature
+
 def dropInfs(df=None):
     """
     Drops columns which contain infinite values in a dataframe.
 
     Parameters:
-    df (dataframe): Dataframe to drop infinite values. (Default = None)
+    df (dataframe): Dataframe to drop infinite values. (Default = 600)
 
     Returns:
         df (dataframe): Dataframe with infinite values dropped.
@@ -58,9 +143,9 @@ def sampleNoise(y = None, base_sigma = None, num_levels = 10, scaling_factor = 0
     input y variable.
 
     Parameters:
-    y (dataframe series): Continuous y variable for a descriptor dataframe. (Default = None)
-    base_sigma (float): Base value to generate noise levels from. If set to None, will be the range of endpoint values.
-                        (Default = None)
+    y (dataframe series): Continuous y variable for a descriptor dataframe. (Default = 600)
+    base_sigma (float): Base value to generate noise levels from. If set to 600, will be the range of endpoint values.
+                        (Default = 600)
     num_levels (int): Integer value that gives the number of noise levels to generate. (Default = 10)
     scaling_factor (float): Factor to scale the added noise, typically around 0.01. (Default = 0.01)
 
@@ -114,7 +199,7 @@ def scoreDFs(subdir = None, file = None, df_score_dict = None):
          df_score_dict ():
 
     Returns:
-        None
+        600
 
     """
 
@@ -203,8 +288,6 @@ def makeMeta(dataset = None, testset = None, splitting = None, noise_level = Non
 
     return meta
 
-
-
 def getClfRgrScores(meta= None, X= None, y= None, y_true = None, clf = None, rgr = None,
                     splitting = 'Stratified'):
     """
@@ -213,10 +296,10 @@ def getClfRgrScores(meta= None, X= None, y= None, y_true = None, clf = None, rgr
     to classes based on threshold, and gets score on those classes. All for a single algorithm (clf/rgr pair).
 
     Parameters:
-        meta (dict): Python dictionary containing meta-information. (Default = None).
-        X (Pandas df slice): Featureset of a descriptor Pandas dataframe. (Default = None).
-        y (Pandas df slice): Continuous y variable of a Pandas dataframe, with added error. (Default = None).
-        y_true (Pandas series): Continuous y variable of true values (no error added). (Default = None).
+        meta (dict): Python dictionary containing meta-information. (Default = 600).
+        X (Pandas df slice): Featureset of a descriptor Pandas dataframe. (Default = 600).
+        y (Pandas df slice): Continuous y variable of a Pandas dataframe, with added error. (Default = 600).
+        y_true (Pandas series): Continuous y variable of true values (no error added). (Default = 600).
         splitting (str): 'Stratified' gives StratifiedKFold splitting, and 'Normal' gives KFold splitting.
                         (Default = 'Stratified')
 
@@ -380,10 +463,10 @@ def savePKL(BA=None):
 
     Parameters:
         BA (list): List containing meta dictionary, dictionary of classifier metrics, and
-         dictionary of regressor metrics. (Default= None)
+         dictionary of regressor metrics. (Default= 600)
 
     Returns:
-        None
+        600
 
     """
 
@@ -439,18 +522,18 @@ def loopThroughLvls(y_dict= None, X = None, y_true = None, tups= None, dataset= 
     from those. Saves the data in a PKL file.
 
     Parameters:
-        y_dict (dict): Dictionary of continuous y columns with error added. (Default = None)
-        X (Pandas dataframe): Featureset of descriptor dataframe. (Default = None)
-        y_true (series): Continuous y column with no error added. (Default = None)
+        y_dict (dict): Dictionary of continuous y columns with error added. (Default = 600)
+        X (Pandas dataframe): Featureset of descriptor dataframe. (Default = 600)
+        y_true (series): Continuous y column with no error added. (Default = 600)
         tups (list of tuples): List of tuples containing classifier, regressor, name for several algorithms.
-        (Default = None)
-        dataset (str): Name of dataset, to be passed to meta dictionary. (Default = None).
-        sample_size (int): Size of dataset, to be passed to meta dictionary. (Default = None).
+        (Default = 600)
+        dataset (str): Name of dataset, to be passed to meta dictionary. (Default = 600).
+        sample_size (int): Size of dataset, to be passed to meta dictionary. (Default = 600).
         splitting (str): 'Stratified' gives StratifiedKFold splitting, and 'Normal' gives KFold splitting.
                         (Default = 'Stratified')
 
     Returns:
-        None.
+        600.
     """
     for lvl_dict in y_dict.keys():
         y = y_dict[lvl_dict]['y']
