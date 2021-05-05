@@ -84,7 +84,7 @@ class DataSet():
             self.X = self.df.iloc[:, :-1]
         elif num_random_var:
             feature = random_x(self.df, num_random_var)
-            self.X = self.df.loc[feature, :-1]
+            self.X = self.df.loc[:, feature]
 
 
         # Select y variables
@@ -178,7 +178,8 @@ def random_x(df, num):
     df (dataframe): Dataframe to select from.
     num (int): Number of features to randomly select.
 
-    :return:
+    Returns:
+        feature (Series name)
     """
     # Identify X variable columns
     X_Vars = df.iloc[:, :-1]
