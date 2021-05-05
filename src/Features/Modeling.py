@@ -104,15 +104,9 @@ def generate_data(tups=None, k_folds= 5, splitting='Stratified', dataset = None)
     from those. Saves the data in a PKL file.
 
     Parameters:
-        y_dict (dict): Dictionary of continuous y columns with error added.
-        X (Pandas dataframe): Featureset of descriptor dataframe.
-        y_true (series): Continuous y column with no error added.
         tups (list of tuples): List of tuples containing classifier, regressor, name for several algorithms.
-        testset (str): Indicates whether the test set in the modeling step contains true values or noise laden values.
-                    Can be 'True' or 'Noise'.
-        dataset (str): Name of dataset, to be passed to meta dictionary.
+        dataset (DataSet instance): DataSet class object.
         k_folds (int): Number of folds used in KFold splitting. (Default = 5)
-        sample_size (int): Size of dataset, to be passed to meta dictionary.
         splitting (str): 'Stratified' gives StratifiedKFold splitting, and 'Normal' gives KFold splitting. (Default = 'Stratified')
 
     Returns:
