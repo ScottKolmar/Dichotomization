@@ -23,7 +23,7 @@ from sklearn.linear_model import LogisticRegression
 from src.Features.Algorithms import *
 
 # Functions
-def countPs(X, y):
+def count_ps(X, y):
     count = 0
     for col in X:
         r,p = pearsonr(X[col], y)
@@ -31,18 +31,18 @@ def countPs(X, y):
             count = count + 1
     return count
 
-def twobinner(y = None, thresh = None):
+def two_binner(y = None, thresh = None):
     if y >= thresh:
         return 1
     else:
         return 0
 
-class dataSet():
+class DataSet():
 
     def __init__(self, csv):
         self.csv  = csv
 
-    def loadDF(self, sample_size = None, num_random_var = False, num_noise_levels = 10):
+    def load_dataframe(self, sample_size = None, num_random_var = False, num_noise_levels = 10, test_set = 'True'):
         """
         Loads instance variables for a dataSheet instance.
 
@@ -64,23 +64,26 @@ class dataSet():
         # Set name variable
         self.name = self.csv.split('.')[0].split('_')[0].split('\\')[6]
 
+        # Set test_set variable
+        self.test_set = test_set
+
         # Sample the dataframe
         try:
             self.df = self.df.sample(sample_size)
         except ValueError:
-            print('The sample_size must be smaller than the size of the dataset, which is: {}'.format(df.shape[0]))
+            print('The sample_size must be smaller than the size of the dataset, which is: {}'.format(self.df.shape[0]))
 
         # Set sample_size variable, which should come after try block in case of failure
         self.sample_size = sample_size
 
         # Drop Infs
-        self.df = dropInfs(self.df)
+        self.df = drop_infs(self.df)
 
         # Select X variables
         if not num_random_var:
             self.X = self.df.iloc[:, :-1]
         elif num_random_var:
-            feature = randomX(df, num_random_var)
+            feature = random_x(self.df, num_random_var)
             self.X = self.df.loc[feature, :-1]
 
 
@@ -88,13 +91,91 @@ class dataSet():
         self.y_true = self.df.iloc[:, -1]
 
         # Sample noise and add to variable
-        self.y_dict = sampleNoise(y = self.y_true, num_levels = num_noise_levels)
+        self.y_dict = sample_noise(y = self.y_true, num_levels = num_noise_levels)
 
-        return None
+        return
+
+def generate_data(tups=None, k_folds= 5, splitting='Stratified', dataset = None):
+    """
+    Loops through each y column stored in y_dict (generated from sampleNoise()), generates 9
+    binary splits on percentiles 10 through 90, splits each binary split into 10 Folds by Stratified
+    KFold(), and trains a classifier/regressor pair on each fold. Takes the average BA score for each fold
+    for classifier, turns the continuous regression predictions into classes, and takes average BA score
+    from those. Saves the data in a PKL file.
+
+    Parameters:
+        y_dict (dict): Dictionary of continuous y columns with error added.
+        X (Pandas dataframe): Featureset of descriptor dataframe.
+        y_true (series): Continuous y column with no error added.
+        tups (list of tuples): List of tuples containing classifier, regressor, name for several algorithms.
+        testset (str): Indicates whether the test set in the modeling step contains true values or noise laden values.
+                    Can be 'True' or 'Noise'.
+        dataset (str): Name of dataset, to be passed to meta dictionary.
+        k_folds (int): Number of folds used in KFold splitting. (Default = 5)
+        sample_size (int): Size of dataset, to be passed to meta dictionary.
+        splitting (str): 'Stratified' gives StratifiedKFold splitting, and 'Normal' gives KFold splitting. (Default = 'Stratified')
+
+    Returns:
+
+    """
+    testset = dataset.test_set
+    y_dict = dataset.y_dict
+    X = dataset.X
+    y_true = dataset.y_true
+    dataset_name = dataset.name
+    sample_size = dataset.sample_size
 
 
+    for lvl_dict in y_dict.keys():
+        y = y_dict[lvl_dict]['y']
+        sigma = y_dict[lvl_dict]['sigma']
+        noise_level = str(lvl_dict)
 
-def randomX(df, num):
+        # Loop through classifier/regressor pairs in tups
+        for clf, rgr, alg_name in tups:
+
+            # Define Loop for thresholds
+            threshes = [np.percentile(y, x) for x in [10, 20, 30, 40, 50, 60, 70, 80, 90]]
+            threshtup = list(zip(threshes, [10, 20, 30, 40, 50, 60, 70, 80, 90]))
+            for thresh, perc in threshtup:
+
+                # Define "metadata" dictionary
+                # Define estimator tuple
+                estimator = [clf, rgr, alg_name]
+                meta = make_meta(dataset=dataset_name,
+                                sample_size=sample_size,
+                                thresh=thresh,
+                                perc=perc,
+                                algorithm=alg_name,
+                                noise_level=noise_level,
+                                sigma=sigma,
+                                k_folds=k_folds,
+                                splitting=splitting,
+                                testset=testset,
+                                estimator=estimator)
+
+                # Make a k-fold split and get a classifier and regressor score for each split
+                BA = get_clf_rgr_scores(meta=meta, X=X, y=y, y_true=y_true, clf=clf, rgr=rgr, splitting=splitting)
+
+                # Save PKL file
+                save_pkl(BA=BA)
+
+                print('Dataset: {}, Noise Level: {}, Split: {}'.format(dataset_name, noise_level, perc))
+                for key in BA[1].keys():
+                    print('{} Classifier {}: {} +/- {}'.format(meta['Algorithm'],
+                                                               key,
+                                                               np.average(BA[1][key][0]['Clfs']),
+                                                               np.std(BA[1][key][0]['Clfs'])))
+                    print('{} Regressor {}: {} +/- {}'.format(meta['Algorithm'],
+                                                              key,
+                                                              np.average(BA[1][key][1]['Rgrs']),
+                                                              np.std(BA[1][key][1]['Rgrs'])))
+                print('\n')
+
+    return None
+
+
+def random_x(df, num):
     """
     Selects a random X variable Series from a dataframe and returns that Series. Filters for variables with variance
     larger than 0.99.
@@ -119,7 +200,7 @@ def randomX(df, num):
 
     return feature
 
-def dropInfs(df=None):
+def drop_infs(df=None):
     """
     Drops columns which contain infinite values in a dataframe.
 
@@ -137,7 +218,7 @@ def dropInfs(df=None):
     df = df.dropna(axis=0, how='any')
     return df
 
-def sampleNoise(y = None, base_sigma = None, num_levels = 10, scaling_factor = 0.01):
+def sample_noise(y = None, base_sigma = None, num_levels = 10, scaling_factor = 0.01):
     """
     Generates 'num_levels' levels of gaussian distributed noise calculated from the integer range of y values in the
     input y variable.
@@ -189,73 +270,8 @@ def sampleNoise(y = None, base_sigma = None, num_levels = 10, scaling_factor = 0
 
     return end_dict
 
-def scoreDFs(subdir = None, file = None, df_score_dict = None):
-    """
-    Appends score information from PKL file to empty score dataframes.
-
-    Parameters:
-         subdir ():
-         file ():
-         df_score_dict ():
-
-    Returns:
-        600
-
-    """
-
-    # Load pickle from OS path
-    BA = pickle.load(open(os.path.join(subdir, file), 'rb'))
-    scores = BA[1]
-
-    for key in scores.keys():
-        clfs = scores[key][0]['Clfs']
-        rgrs = scores[key][1]['Rgrs']
-
-        # Get averages and stds
-        clf_ave = np.average(clfs)
-        clf_std = np.std(clfs)
-        rgr_ave = np.average(rgrs)
-        rgr_std = np.std(rgrs)
-
-        # Load meta and assign values to variables
-        meta = BA[0]
-        algorithm = meta['Algorithm']
-        noise = meta['Noise Level']
-        sigma = meta['Sigma']
-        perc = meta['Percentile']
-        testset = meta['Test Set']
-        splitting = meta['Splitting']
-
-        # Make new dictionaries out of meta dictionary
-        clf_data = {'Algorithm': [algorithm],
-                    'Noise': [noise],
-                    'Testset': [testset],
-                    'Splitting': [splitting],
-                    'Sigma': [sigma],
-                    'Percentile': [perc],
-                    'Average': [clf_ave],
-                    'Std': [clf_std]}
-        rgr_data = {'Algorithm': [algorithm],
-                    'Noise': [noise],
-                    'Testset': [testset],
-                    'Splitting': [splitting],
-                    'Sigma': [sigma],
-                    'Percentile': [perc],
-                    'Average': [rgr_ave],
-                    'Std': [rgr_std]}
-
-        # Convert to rows in new dataframes
-        clf_data_df = pd.DataFrame.from_dict(data=clf_data, orient='columns')
-        rgr_data_df = pd.DataFrame.from_dict(data=rgr_data, orient='columns')
-
-        # Append rows to prior dataframes
-        df_score_dict[key][0] = df_score_dict[key][0].append(clf_data_df, ignore_index = True)
-        df_score_dict[key][1] = df_score_dict[key][1].append(rgr_data_df, ignore_index=True)
-
-    return df_score_dict
-
-def makeMeta(dataset = None, testset = None, splitting = None, noise_level = None, sigma = None, sample_size = None,
-             perc = None, thresh = None, k_folds = None, name = None, estimator = None):
+def make_meta(dataset = None, testset = None, splitting = None, noise_level = None, sigma = None, sample_size = None,
+             perc = None, thresh = None, k_folds = None, algorithm = None, estimator = None):
     """
     Makes a meta information dictionary for the PKL file.
 
@@ -282,13 +298,13 @@ def makeMeta(dataset = None, testset = None, splitting = None, noise_level = Non
             'Percentile': perc,
             'Threshold': thresh,
             'K Folds': k_folds,
-            'Algorithm': name,
+            'Algorithm': algorithm,
             'Estimator': estimator
             }
 
     return meta
 
-def getClfRgrScores(meta= None, X= None, y= None, y_true = None, clf = None, rgr = None,
+def get_clf_rgr_scores(meta= None, X= None, y= None, y_true = None, clf = None, rgr = None,
                     splitting = 'Stratified'):
     """
     Takes a meta-dictionary, X, and y, and converts y to classes based on a threshold. Performs Stratified K-Fold
@@ -311,7 +327,7 @@ def getClfRgrScores(meta= None, X= None, y= None, y_true = None, clf = None, rgr
     k_folds = meta['K Folds']
 
     # Vectorize binning function
-    twobin_v = np.vectorize(twobinner)
+    twobin_v = np.vectorize(two_binner)
 
     # Define y_class
     y_class = pd.DataFrame(twobin_v(y, thresh=thresh), index= y.index)
@@ -456,7 +472,7 @@ def getClfRgrScores(meta= None, X= None, y= None, y_true = None, clf = None, rgr
 
     return BA
 
-def savePKL(BA=None):
+def save_pkl(BA=None):
     """
     Takes a list BA which contains a meta-dictionary and algorithm metrics,
     and saves a PKL file with all the information.
@@ -511,66 +527,3 @@ def savePKL(BA=None):
         pickle.dump(BA, f)
 
     return
-
-def loopThroughLvls(y_dict= None, X = None, y_true = None, tups= None, dataset= None, sample_size= None,
-                    splitting = 'Stratified', testset = None, k_folds = None):
-    """
-    Loops through each y column stored in y_dict (generated from sampleNoise()), generates 9
-    binary splits on percentiles 10 through 90, splits each binary split into 10 Folds by Stratified
-    KFold(), and trains a classifier/regressor pair on each fold. Takes the average BA score for each fold
-    for classifier, turns the continuous regression predictions into classes, and takes average BA score
-    from those. Saves the data in a PKL file.
-
-    Parameters:
-        y_dict (dict): Dictionary of continuous y columns with error added. (Default = 600)
-        X (Pandas dataframe): Featureset of descriptor dataframe. (Default = 600)
-        y_true (series): Continuous y column with no error added. (Default = 600)
-        tups (list of tuples): List of tuples containing classifier, regressor, name for several algorithms.
-        (Default = 600)
-        dataset (str): Name of dataset, to be passed to meta dictionary. (Default = 600).
-        sample_size (int): Size of dataset, to be passed to meta dictionary. (Default = 600).
-        splitting (str): 'Stratified' gives StratifiedKFold splitting, and 'Normal' gives KFold splitting.
-                        (Default = 'Stratified')
-
-    Returns:
-        600.
-    """
-    for lvl_dict in y_dict.keys():
-        y = y_dict[lvl_dict]['y']
-        sigma = y_dict[lvl_dict]['sigma']
-        noise_level = str(lvl_dict)
-
-        # Loop through classifier/regressor pairs in tups
-        for clf, rgr, name in tups:
-
-            # Define Loop for thresholds
-            threshes = [np.percentile(y, x) for x in [10, 20, 30, 40, 50, 60, 70, 80, 90]]
-            threshtup = list(zip(threshes, [10, 20, 30, 40, 50, 60, 70, 80, 90]))
-            for thresh, perc in threshtup:
-
-                # Define "metadata" dictionary
-                # Define estimator tuple
-                estimator = [clf, rgr, name]
-                meta = makeMeta(dataset=dataset, sample_size=sample_size, thresh=thresh, perc=perc, name=name,
-                                noise_level=noise_level, sigma=sigma, k_folds=k_folds, splitting = splitting,
-                                testset = testset, estimator= estimator)
-
-                # Make a k-fold split and get a classifier and regressor score for each split
-                BA = getClfRgrScores(meta=meta, X=X, y=y, y_true = y_true, clf=clf, rgr=rgr, splitting = splitting)
-
-                # Save PKL file
-                savePKL(BA=BA)
-
-                print('Dataset: {}, Noise Level: {}, Split: {}'.format(dataset, noise_level, perc))
-                for key in BA[1].keys():
-                    print('{} Classifier {}: {} +/- {}'.format(meta['Algorithm'],
-                                                            key,
-                                                            np.average(BA[1][key][0]['Clfs']),
-                                                            np.std(BA[1][key][0]['Clfs'])))
-                    print('{} Regressor {}: {} +/- {}'.format(meta['Algorithm'],
-                                                           key,
-                                                           np.average(BA[1][key][1]['Rgrs']),
-                                                           np.std(BA[1][key][1]['Rgrs'])))
-                print('\n')
-
-    return None
