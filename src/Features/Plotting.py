@@ -6,52 +6,127 @@ import os
 from src.Features.Modeling import *
 
 # Functions
-def metaMatch(file=None, metasearch=None):
+class scoreSheet():
     """
-    Matches a search meta dictionary with a meta dictionary from a PKL file, and returns True if everything matches.
+    Object for storing scores, used for plotting.
+
+    """
+
+    def __init__(self):
+        scorenames = ['BA', 'F1', 'ROC-AUC', 'Brier', 'Kappa', 'Logloss', 'Pearsphi']
+        for name in scorenames:
+            # Store scores as dataframes inside of a dictionary
+            setattr(self, name, {'clf': pd.DataFrame(),
+                                 'rgr': pd.DataFrame()})
+
+    def __iter__(self):
+        for attr, value in self.__dict__.iteritems():
+            yield attr, value
+
+    def load_scores(self, pklfile):
+        BA = pickle.load(open(pklfile, 'rb'))
+        meta = BA[0]
+        scores = BA[1]
+
+        # Iterate through each score
+        for key in scores.keys():
+            clfs = scores[key][0]['Clfs']
+            rgrs = scores[key][1]['Rgrs']
+
+            # Get averages and stds
+            clf_ave = np.average(clfs)
+            clf_std = np.std(clfs)
+            rgr_ave = np.average(rgrs)
+            rgr_std = np.std(rgrs)
+
+            # Make dataframes from meta and add scores
+            clf_data = pd.DataFrame.from_dict(data=meta, orient='columns')
+            clf_data['Average'] = clf_ave
+            clf_data['Std'] = clf_std
+            clf_data['Score Name'] = key
+
+            rgr_data = pd.DataFrame.from_dict(data=meta, orient='columns')
+            rgr_data['Average'] = rgr_ave
+            rgr_data['Std'] = rgr_std
+            rgr_data['Score Name'] = key
+
+            # Append rows to prior dataframes
+            self.__getattribute__(str(key))['clf'] = self.__getattribute__(str(key))['clf'].append(clf_data, ignore_index=True)
+            self.__getattribute__(str(key))['rgr'] = self.__getattribute__(str(key))['rgr'].append(rgr_data, ignore_index=True)
+
+def plotObjects2D(rootdir, search_dict = None):
+    """
 
     Parameters:
-           file (PKL): PKL file to load a meta dictionary from.
-           metasearch (dict): Meta search dictionary with the same keys as the meta dictionaries in this library.
+    rootdir (str): Absolute filepath to the directory which contains the PKL files of interest,
+                    i.e. '...\\PKL\\g298atom'. The end of the path will be used to assign the dataset in the output
+                    PNG file.
+    search_dict (dict): Dictionary for finding the PKL files of interest. The keys for the dictionary must be found in
+                        the meta_dictionary of the PKL files. For example, 'Algorithm', 'Noise', 'Testset', etc. This
+                        dictionary will filter the files for building the plots.
 
     Returns:
-           True or False
 
+    :return:
     """
-    meta_dict = pickle.load(open(file, 'rb'))[0]
-    for k, v in metasearch.items():
-        if metasearch[k] == meta_dict[k]:
+    # Initialize scoreSheet object
+    sheet = scoreSheet()
+
+    # Loop through each PKL and fill out df_score_dict
+    for subdir, dirs, files in os.walk(rootdir):
+        for file in files:
+            pklfile = os.path.join(subdir, file)
+            sheet.loadScores2(pklfile)
+
+    # Filtering
+
+    for key in vars(sheet).keys():
+        df_clf = sheet.__getattribute__(str(key))['clf']
+        df_rgr = sheet.__getattribute__(str(key))['rgr']
+        if search_dict:
+            for search_key in search_dict.keys():
+                df_clf = df_clf[df_clf[search_key] == search_dict[search_key]]
+                df_rgr = df_rgr[df_rgr[search_key] == search_dict[search_key]]
+        else:
             pass
-        elif metasearch[k] != meta_dict[k]:
-            return False
 
-    return True
+        # Make figure
+        fig = plt.figure()
+        plt.errorbar(x=df_clf['Percentile'], y=df_clf['Average'], yerr=df_clf['Std'], label='Clf')
+        plt.errorbar(x=df_rgr['Percentile'], y=df_rgr['Average'], yerr=df_rgr['Std'], label='Rgr')
+        plt.legend()
+        plt.xlabel('Percentile')
+        plt.ylabel(key)
+        plt.title(str(df_clf['Algorithm'][0]) + ' ' + str(df_clf['Noise Level'][0]))
 
-def getFileString(file):
-    """
-    Gets file string from PKL file.
+        # Define directory path for PNG file from PKL file path
+        pngparent = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PNG'
+        dataset = str(df_clf['Dataset'][0])
+        testset = str(df_clf['Test Set'][0])
+        splitting = str(df_clf['Splitting'][0])
+        sample_size = str(df_clf['Sample Size'][0])
+        noise = str(df_clf['Noise Level'][0])
+        pngfoldpath = os.path.join(pngparent, dataset, testset, splitting, sample_size, noise)
 
-    Parameters:
-           file (PKL): Absolute filepath for PKL File containing meta dictionary.
+        # Make directory paths if they don't exist
+        if not os.path.exists(pngfoldpath):
+            os.makedirs(pngfoldpath)
 
-    Returns:
-           pngstring (str): File string made up from the meta dictionary of the PKL file, with PNG extension.
-    """
-    meta = pickle.load(open(file, 'rb'))
-    meta_dict = meta[0]
-    lst = [meta_dict['Dataset'],
-           meta_dict['Test Set'],
-           meta_dict['Splitting'],
-           meta_dict['Sample Size'],
-           meta_dict['Noise Level'],
-           meta_dict['Percentile'],
-           meta_dict['K Folds'],
-           meta_dict['Algorithm']]
+        # Define filename
+        pngfilename = '{}_{}_{}_{}_{}_{}_{}_{}.png'.format(dataset,
+                                                           testset,
+                                                           splitting,
+                                                           sample_size,
+                                                           noise,
+                                                           df_clf['K Folds'][0],
+                                                           df_clf['Score Name'][0],
+                                                           df_clf['Algorithm'][0])
 
-    lststrs = [str(x) for x in lst]
-    pngstring = '_'.join(lststrs) + '.png'
+        # Save figure as PNG
+        #plt.savefig(os.path.join(pngfoldpath, pngfilename))
+        #plt.close(fig=fig)
 
-    return pngstring
+    return sheet
 
 def scoreDFs(subdir = None, file = None, df_score_dict = None):
     """
@@ -203,186 +278,6 @@ def makeHeatMaps(y_true=None, y_dict=None):
         plt.savefig(os.path.join(pngfolder, dataset, pngfile))
 
     return
-
-class scoreSheet():
-    """
-    Object for storing scores, used for plotting.
-    """
-
-    def __init__(self):
-        scorenames = ['BA', 'F1', 'ROC-AUC', 'Brier', 'Kappa', 'Logloss', 'Pearsphi']
-        for name in scorenames:
-            # Store scores as dataframes inside of a dictionary
-            setattr(self, name, {'clf': pd.DataFrame(),
-                                 'rgr': pd.DataFrame()})
-
-    def __iter__(self):
-        for attr, value in self.__dict__.iteritems():
-            yield attr, value
-
-    def loadScores(self, pklfile):
-        BA = pickle.load(open(pklfile, 'rb'))
-        scores = BA[1]
-
-        for key in scores.keys():
-            clfs = scores[key][0]['Clfs']
-            rgrs = scores[key][1]['Rgrs']
-
-            # Get averages and stds
-            clf_ave = np.average(clfs)
-            clf_std = np.std(clfs)
-            rgr_ave = np.average(rgrs)
-            rgr_std = np.std(rgrs)
-
-            # Load meta and assign values to variables
-            meta = BA[0]
-            algorithm = meta['Algorithm']
-            noise = meta['Noise Level']
-            sigma = meta['Sigma']
-            perc = meta['Percentile']
-            testset = meta['Test Set']
-            splitting = meta['Splitting']
-            sample_size = meta['Sample Size']
-            dataset = meta['Dataset']
-            kfolds = meta['K Folds']
-
-            # Make new dictionaries out of meta dictionary
-            clf_data = {'Dataset': [dataset],
-                        'Algorithm': [algorithm],
-                        'Sample Size': [sample_size],
-                        'K Folds': [kfolds],
-                        'Noise': [noise],
-                        'Testset': [testset],
-                        'Splitting': [splitting],
-                        'Sigma': [sigma],
-                        'Percentile': [perc],
-                        'Average': [clf_ave],
-                        'Std': [clf_std]}
-            rgr_data = {'Dataset': [dataset],
-                        'Algorithm': [algorithm],
-                        'Sample Size': [sample_size],
-                        'Noise': [noise],
-                        'Testset': [testset],
-                        'Splitting': [splitting],
-                        'Sigma': [sigma],
-                        'Percentile': [perc],
-                        'Average': [rgr_ave],
-                        'Std': [rgr_std]}
-
-            # Convert to rows in new dataframes
-            clf_data_df = pd.DataFrame.from_dict(data=clf_data, orient='columns')
-            rgr_data_df = pd.DataFrame.from_dict(data=rgr_data, orient='columns')
-
-            # Append rows to prior dataframes
-            self.__getattribute__(str(key))['clf'] = self.__getattribute__(str(key))['clf'].append(clf_data_df, ignore_index = True)
-            self.__getattribute__(str(key))['rgr'] = self.__getattribute__(str(key))['rgr'].append(rgr_data_df, ignore_index=True)
-
-    def loadScores2(self, pklfile):
-        BA = pickle.load(open(pklfile, 'rb'))
-        meta = BA[0]
-        scores = BA[1]
-
-        # Iterate through each score
-        for key in scores.keys():
-            clfs = scores[key][0]['Clfs']
-            rgrs = scores[key][1]['Rgrs']
-
-            # Get averages and stds
-            clf_ave = np.average(clfs)
-            clf_std = np.std(clfs)
-            rgr_ave = np.average(rgrs)
-            rgr_std = np.std(rgrs)
-
-            # Make dataframes from meta and add scores
-            clf_data = pd.DataFrame.from_dict(data=meta, orient='columns')
-            clf_data['Average'] = clf_ave
-            clf_data['Std'] = clf_std
-            clf_data['Score Name'] = key
-
-            rgr_data = pd.DataFrame.from_dict(data=meta, orient='columns')
-            rgr_data['Average'] = rgr_ave
-            rgr_data['Std'] = rgr_std
-            rgr_data['Score Name'] = key
-
-            # Append rows to prior dataframes
-            self.__getattribute__(str(key))['clf'] = self.__getattribute__(str(key))['clf'].append(clf_data, ignore_index=True)
-            self.__getattribute__(str(key))['rgr'] = self.__getattribute__(str(key))['rgr'].append(rgr_data, ignore_index=True)
-
-
-
-def plotObjects2D(rootdir, search_dict = None):
-    """
-
-    Parameters:
-    rootdir (str): Absolute filepath to the directory which contains the PKL files of interest,
-                    i.e. '...\\PKL\\g298atom'. The end of the path will be used to assign the dataset in the output
-                    PNG file.
-    search_dict (dict): Dictionary for finding the PKL files of interest. The keys for the dictionary must be found in
-                        the meta_dictionary of the PKL files. For example, 'Algorithm', 'Noise', 'Testset', etc. This
-                        dictionary will filter the files for building the plots.
-
-    Returns:
-
-    :return:
-    """
-    # Initialize scoreSheet object
-    sheet = scoreSheet()
-
-    # Loop through each PKL and fill out df_score_dict
-    for subdir, dirs, files in os.walk(rootdir):
-        for file in files:
-            pklfile = os.path.join(subdir, file)
-            sheet.loadScores2(pklfile)
-
-    # Filtering
-
-    for key in vars(sheet).keys():
-        df_clf = sheet.__getattribute__(str(key))['clf']
-        df_rgr = sheet.__getattribute__(str(key))['rgr']
-        if search_dict:
-            for search_key in search_dict.keys():
-                df_clf = df_clf[df_clf[search_key] == search_dict[search_key]]
-                df_rgr = df_rgr[df_rgr[search_key] == search_dict[search_key]]
-        else:
-            pass
-
-        # Make figure
-        fig = plt.figure()
-        plt.errorbar(x=df_clf['Percentile'], y=df_clf['Average'], yerr=df_clf['Std'], label='Clf')
-        plt.errorbar(x=df_rgr['Percentile'], y=df_rgr['Average'], yerr=df_rgr['Std'], label='Rgr')
-        plt.legend()
-        plt.xlabel('Percentile')
-        plt.ylabel(key)
-        plt.title(str(df_clf['Algorithm'][0]) + ' ' + str(df_clf['Noise Level'][0]))
-
-        # Define directory path for PNG file from PKL file path
-        pngparent = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PNG'
-        dataset = str(df_clf['Dataset'][0])
-        testset = str(df_clf['Test Set'][0])
-        splitting = str(df_clf['Splitting'][0])
-        sample_size = str(df_clf['Sample Size'][0])
-        noise = str(df_clf['Noise Level'][0])
-        pngfoldpath = os.path.join(pngparent, dataset, testset, splitting, sample_size, noise)
-
-        # Make directory paths if they don't exist
-        if not os.path.exists(pngfoldpath):
-            os.makedirs(pngfoldpath)
-
-        # Define filename
-        pngfilename = '{}_{}_{}_{}_{}_{}_{}_{}.png'.format(dataset,
-                                                           testset,
-                                                           splitting,
-                                                           sample_size,
-                                                           noise,
-                                                           df_clf['K Folds'][0],
-                                                           df_clf['Score Name'][0],
-                                                           df_clf['Algorithm'][0])
-
-        # Save figure as PNG
-        #plt.savefig(os.path.join(pngfoldpath, pngfilename))
-        #plt.close(fig=fig)
-
-    return sheet
 
 def plot2D(rootdir = None, metasearch = None):
     """
