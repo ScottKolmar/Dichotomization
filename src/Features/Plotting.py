@@ -78,58 +78,71 @@ def plot_scores(rootdir, search_dict = None):
             pklfile = os.path.join(subdir, file)
             sheet.load_scores(pklfile)
 
-    # Filtering
+    # Load dataframes as function variables for manipulation, leaving class variables unaffected
     for key in vars(sheet).keys():
         df_clf = sheet.__getattribute__(str(key))['clf']
         df_rgr = sheet.__getattribute__(str(key))['rgr']
-        if search_dict:
+
+        # Require that the search_dict have at least a filter for algorithm
+        if not search_dict:
+            print("User must provide at least a filter for algorithm in search_dict via 'Algorithm': value")
+            return
+
+        elif 'Algorithm' not in search_dict.keys():
+            print("User must provide at least a filter for algorithm in search_dict via 'Algorithm': value")
+            return
+
+        else:
+
+            # Apply each filter in search_dict keys
             for search_key in search_dict.keys():
                 df_clf = df_clf[df_clf[search_key] == search_dict[search_key]]
                 df_rgr = df_rgr[df_rgr[search_key] == search_dict[search_key]]
-        else:
-            pass
 
-        # Print error statement if empty df
-        if df_clf.empty:
-            print('Filtering has produced an empty classifier dataframe.')
-        elif df_rgr.empty:
-            print('Filtering has produced an empty regressor dataframe.')
-        else:
-            # Make figure
-            fig = plt.figure()
-            plt.errorbar(x=df_clf['Percentile'], y=df_clf['Average'], yerr=df_clf['Std'], label='Clf')
-            plt.errorbar(x=df_rgr['Percentile'], y=df_rgr['Average'], yerr=df_rgr['Std'], label='Rgr')
-            plt.legend()
-            plt.xlabel('Percentile')
-            plt.ylabel(key)
-            plt.title(str(df_clf['Algorithm'][0]) + ' ' + str(df_clf['Noise Level'][0]))
+            # Print error statement if filter results in empty df
+            if df_clf.empty:
+                print('Filtering has produced an empty classifier dataframe.')
 
-            # Define directory path for PNG file from PKL file path
-            pngparent = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PNG'
-            dataset = str(df_clf['Dataset'][0])
-            testset = str(df_clf['Test Set'][0])
-            splitting = str(df_clf['Splitting'][0])
-            sample_size = str(df_clf['Sample Size'][0])
-            noise = str(df_clf['Noise Level'][0])
-            pngfoldpath = os.path.join(pngparent, dataset, testset, splitting, sample_size, noise)
+            elif df_rgr.empty:
+                print('Filtering has produced an empty regressor dataframe.')
 
-            # Make directory paths if they don't exist
-            if not os.path.exists(pngfoldpath):
-                os.makedirs(pngfoldpath)
+            else:
 
-            # Define filename
-            pngfilename = '{}_{}_{}_{}_{}_{}_{}_{}.png'.format(dataset,
-                                                               testset,
-                                                               splitting,
-                                                               sample_size,
-                                                               noise,
-                                                               df_clf['K Folds'][0],
-                                                               df_clf['Score Name'][0],
-                                                               df_clf['Algorithm'][0])
+                # Make figure
+                fig = plt.figure()
+                plt.errorbar(x=df_clf['Percentile'], y=df_clf['Average'], yerr=df_clf['Std'], label='Clf')
+                plt.errorbar(x=df_rgr['Percentile'], y=df_rgr['Average'], yerr=df_rgr['Std'], label='Rgr')
+                plt.legend()
+                plt.xlabel('Percentile')
+                plt.ylabel(key)
+                plt.title(search_dict['Algorithm'] + ' ' + str(df_clf['Noise Level'].iloc[0]))
 
-            # Save figure as PNG
-            plt.savefig(os.path.join(pngfoldpath, pngfilename))
-            plt.close(fig=fig)
+                # Define directory path for PNG file from PKL file path
+                pngparent = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PNG'
+                dataset = str(df_clf['Dataset'].iloc[0])
+                testset = str(df_clf['Test Set'].iloc[0])
+                splitting = str(df_clf['Splitting'].iloc[0])
+                sample_size = str(df_clf['Sample Size'].iloc[0])
+                noise = str(df_clf['Noise Level'].iloc[0])
+                pngfoldpath = os.path.join(pngparent, dataset, testset, splitting, sample_size, noise)
+
+                # Make directory paths if they don't exist
+                if not os.path.exists(pngfoldpath):
+                    os.makedirs(pngfoldpath)
+
+                # Define filename
+                pngfilename = '{}_{}_{}_{}_{}_{}_{}_{}.png'.format(dataset,
+                                                                   testset,
+                                                                   splitting,
+                                                                   sample_size,
+                                                                   noise,
+                                                                   df_clf['K Folds'].iloc[0],
+                                                                   df_clf['Score Name'].iloc[0],
+                                                                   search_dict['Algorithm'])
+
+                # Save figure as PNG
+                plt.savefig(os.path.join(pngfoldpath, pngfilename))
+                plt.close(fig=fig)
 
     return sheet
 

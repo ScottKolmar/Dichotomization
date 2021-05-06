@@ -80,13 +80,13 @@ class DataSet():
         # Select X variables
         if not num_random_var:
             self.X = self.df.iloc[:, :-1]
-            self.num_features = len(X.columns)
-            self.features = X.columns
+            self.num_features = len(self.X.columns)
+            self.features = self.X.columns
         elif num_random_var:
             feature = random_x(self.df, num_random_var)
             self.X = self.df.loc[:, feature]
-            self.num_features = len(X.columns)
-            self.features = X.columns
+            self.num_features = len(self.X.columns)
+            self.features = self.X.columns
 
 
         # Select y variables
