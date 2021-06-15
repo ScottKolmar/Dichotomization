@@ -143,6 +143,7 @@ def generate_data(tups=None, k_folds= 5, splitting='Stratified', test_set = 'Tru
     y_true = dataset.y_true
     dataset_name = dataset.name
     sample_size = dataset.sample_size
+    num_features = dataset.num_features
 
 
     for lvl_dict in y_dict.keys():
@@ -190,7 +191,10 @@ def generate_data(tups=None, k_folds= 5, splitting='Stratified', test_set = 'Tru
                 # Save PKL file
                 save_pkl(BA=BA, parent_path = dataset.parent_path)
 
-                print('Dataset: {}, Noise Level: {}, Split: {}'.format(dataset_name, noise_level, perc))
+                print('Dataset: {}\n Noise Level: {}\n Split: {}\n Variables: {}\n'.format(dataset_name,
+                                                                                           noise_level,
+                                                                                           perc,
+                                                                                           num_features))
                 for key in BA[1].keys():
                     print('{} Classifier {}: {} +/- {}'.format(meta['Algorithm'],
                                                                key,
