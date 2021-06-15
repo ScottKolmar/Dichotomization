@@ -5,6 +5,7 @@ import pickle
 import os
 from itertools import compress
 import random
+import datetime
 
 # Import sklearn
 from scipy.stats.stats import pearsonr, ttest_ind
@@ -42,7 +43,7 @@ class DataSet():
     def __init__(self, csv):
         self.csv  = csv
 
-    def load_dataframe(self, sample_size = None, num_random_var = False, num_noise_levels = 10):
+    def load_dataframe(self, sample_size = None, num_random_var = False, num_noise_levels = 10, parent_path = None):
         """
         Loads instance variables for a dataSheet instance.
 
@@ -51,6 +52,7 @@ class DataSet():
         sample_size (int): Number of entries to sample from the dataset.
         num_random_var (int): Number of random variables to select. If False, all data will be selected. (Default = False)
         num_noise_levels (int): Number of noise levels to generate. (Default = 10)
+        parent_path (string): Custom folder to save results in, if desired. (Default = None)
 
         :return:
         """
@@ -90,6 +92,9 @@ class DataSet():
 
         # Sample noise and add to variable
         self.y_dict = sample_noise(y = self.y_true, num_levels = num_noise_levels)
+
+        # Set optional parent_path variables
+        self.parent_path = parent_path
 
         return
 
@@ -183,7 +188,7 @@ def generate_data(tups=None, k_folds= 5, splitting='Stratified', test_set = 'Tru
                 BA = get_clf_rgr_scores(meta=meta, thresh = thresh, k_folds = k_folds, X=X, y=y, y_true=y_true, clf=clf, rgr=rgr, splitting=splitting)
 
                 # Save PKL file
-                save_pkl(BA=BA)
+                save_pkl(BA=BA, parent_path = dataset.parent_path)
 
                 print('Dataset: {}, Noise Level: {}, Split: {}'.format(dataset_name, noise_level, perc))
                 for key in BA[1].keys():
@@ -525,30 +530,33 @@ def save_pkl(BA=None, parent_path = None):
     # Define parent directory and specific directory
     if not parent_path:
         parent_path = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PKL'
+        foldpath = os.path.join(parent_path,
+                                str(dataset),
+                                str(testset),
+                                str(splitting),
+                                str(sample_size),
+                                str(noise_level),
+                                str(perc))
     elif parent_path:
-        parent_path = os.path.join(r'C:\Users\skolmar\PycharmProjects\Dichotomization\PKL', parent_path)
+        foldpath = os.path.join(r'C:\Users\skolmar\PycharmProjects\Dichotomization\PKL', parent_path)
 
-    foldpath = os.path.join(parent_path,
-                            str(dataset),
-                            str(testset),
-                            str(splitting),
-                            str(sample_size),
-                            str(noise_level),
-                            str(perc))
+
 
     # Check if directory path exists and make directory
     if not os.path.exists(foldpath):
         os.makedirs(foldpath)
 
     # Save PKL file
-    pklfilename = '{}_{}_{}_{}_{}_{}_{}_{}.pkl'.format(dataset,
+    uniq_tag = str(datetime.datetime.now().date()) + '_' + str(datetime.datetime.now().time()).replace(':', '.')
+    pklfilename = '{}_{}_{}_{}_{}_{}_{}_{}_{}.pkl'.format(dataset,
                                                     testset,
                                                     splitting,
                                                     sample_size,
                                                     noise_level,
                                                     perc,
                                                     kfolds,
-                                                    name)
+                                                    name,
+                                                    uniq_tag)
     pklfile = os.path.join(foldpath, pklfilename)
     with open(pklfile, 'wb') as f:
         pickle.dump(BA, f)
