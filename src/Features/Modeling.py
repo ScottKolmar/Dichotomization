@@ -42,7 +42,7 @@ class DataSet():
     def __init__(self, csv):
         self.csv  = csv
 
-    def load_dataframe(self, sample_size = None, num_random_var = False, num_noise_levels = 10, test_set = 'True'):
+    def load_dataframe(self, sample_size = None, num_random_var = False, num_noise_levels = 10):
         """
         Loads instance variables for a dataSheet instance.
 
@@ -51,7 +51,6 @@ class DataSet():
         sample_size (int): Number of entries to sample from the dataset.
         num_random_var (int): Number of random variables to select. If False, all data will be selected. (Default = False)
         num_noise_levels (int): Number of noise levels to generate. (Default = 10)
-        test_set (str): Can be 'True' or 'Noise'. Determines whether the test set for modeling will have noise or not. (Default = 'True')
 
         :return:
         """
@@ -61,9 +60,6 @@ class DataSet():
 
         # Set name variable
         self.name = self.csv.split('.')[0].split('_')[0].split('\\')[6]
-
-        # Set test_set variable
-        self.test_set = test_set
 
         # Sample the dataframe
         try:
@@ -97,7 +93,24 @@ class DataSet():
 
         return
 
-def generate_data(tups=None, k_folds= 5, splitting='Stratified', dataset = None):
+def make_meta_func(dataset):
+    """
+    Takes all the attributes of a dataset object and puts them into an external meta dictionary.
+
+    Parameters:
+         dataset (dataset object): DataSet class object.
+
+    Returns:
+        meta_dict (dict): Dictionary containing all the dataset attributes.
+    """
+    meta_dict = {}
+    for key in vars(dataset):
+        if key not in ['csv', 'df', 'X', 'y_true', 'y_dict', 'features']:
+            meta_dict[key] = vars(dataset)[key]
+
+    return meta_dict
+
+def generate_data(tups=None, k_folds= 5, splitting='Stratified', test_set = 'True', dataset = None):
     """
     Loops through each y column stored in y_dict (generated from sampleNoise()), generates 9
     binary splits on percentiles 10 through 90, splits each binary split into 10 Folds by Stratified
@@ -110,11 +123,16 @@ def generate_data(tups=None, k_folds= 5, splitting='Stratified', dataset = None)
         dataset (DataSet instance): DataSet class object.
         k_folds (int): Number of folds used in KFold splitting. (Default = 5)
         splitting (str): 'Stratified' gives StratifiedKFold splitting, and 'Normal' gives KFold splitting. (Default = 'Stratified')
-
+        test_set (str): Can be 'True' or 'Noise'. Determines whether the test set for modeling will have noise or not. (Default = 'True')
     Returns:
 
     """
-    testset = dataset.test_set
+    # Set class variables from function inputs
+    dataset.test_set = test_set
+    dataset.splitting = splitting
+    dataset.k_folds = k_folds
+
+    # Set function variables from dataset class variables
     y_dict = dataset.y_dict
     X = dataset.X
     y_true = dataset.y_true
@@ -135,23 +153,34 @@ def generate_data(tups=None, k_folds= 5, splitting='Stratified', dataset = None)
             threshtup = list(zip(threshes, [10, 20, 30, 40, 50, 60, 70, 80, 90]))
             for thresh, perc in threshtup:
 
-                # Define "metadata" dictionary
                 # Define estimator tuple
                 estimator = [clf, rgr, alg_name]
-                meta = make_meta(dataset=dataset_name,
-                                sample_size=sample_size,
-                                thresh=thresh,
-                                perc=perc,
-                                algorithm=alg_name,
-                                noise_level=noise_level,
-                                sigma=sigma,
-                                k_folds=k_folds,
-                                splitting=splitting,
-                                testset=testset,
-                                estimator=estimator)
+
+                # Define meta dictionary from dataset attributes
+                meta = make_meta_func(dataset)
+
+                # Fill in meta dictionary from loop specific variables
+                meta['Threshold'] = thresh
+                meta['Percentile'] = perc
+                meta['Algorithm'] = alg_name
+                meta['Noise Level'] = noise_level
+                meta['Sigma'] = sigma
+                meta['Estimator'] = estimator
+
+                # meta = make_meta(dataset=dataset_name,
+                #                 sample_size=sample_size,
+                #                 thresh=thresh,
+                #                 perc=perc,
+                #                 algorithm=alg_name,
+                #                 noise_level=noise_level,
+                #                 sigma=sigma,
+                #                 k_folds=k_folds,
+                #                 splitting=splitting,
+                #                 testset=testset,
+                #                 estimator=estimator)
 
                 # Make a k-fold split and get a classifier and regressor score for each split
-                BA = get_clf_rgr_scores(meta=meta, X=X, y=y, y_true=y_true, clf=clf, rgr=rgr, splitting=splitting)
+                BA = get_clf_rgr_scores(meta=meta, thresh = thresh, k_folds = k_folds, X=X, y=y, y_true=y_true, clf=clf, rgr=rgr, splitting=splitting)
 
                 # Save PKL file
                 save_pkl(BA=BA)
@@ -301,7 +330,7 @@ def make_meta(dataset = None, testset = None, splitting = None, noise_level = No
 
     return meta
 
-def get_clf_rgr_scores(meta= None, X= None, y= None, y_true = None, clf = None, rgr = None,
+def get_clf_rgr_scores(meta= None, thresh = None, k_folds = None, X= None, y= None, y_true = None, clf = None, rgr = None,
                     splitting = 'Stratified'):
     """
     Takes a meta-dictionary, X, and y, and converts y to classes based on a threshold. Performs Stratified K-Fold
@@ -319,9 +348,6 @@ def get_clf_rgr_scores(meta= None, X= None, y= None, y_true = None, clf = None, 
     Returns:
          BA (list): List of meta dictionary, classifier score dictionary, and regressor score dictionary.
     """
-    # Define relevant meta variables
-    thresh = meta['Threshold']
-    k_folds = meta['K Folds']
 
     # Vectorize binning function
     twobin_v = np.vectorize(two_binner)
@@ -469,7 +495,7 @@ def get_clf_rgr_scores(meta= None, X= None, y= None, y_true = None, clf = None, 
 
     return BA
 
-def save_pkl(BA=None):
+def save_pkl(BA=None, parent_path = None):
     """
     Takes a list BA which contains a meta-dictionary and algorithm metrics,
     and saves a PKL file with all the information.
@@ -487,18 +513,22 @@ def save_pkl(BA=None):
     meta = BA[0]
 
     # Define meta variables
-    dataset = meta['Dataset']
-    testset = meta['Test Set']
-    splitting = meta['Splitting']
-    sample_size = meta['Sample Size']
+    dataset = meta['name']
+    testset = meta['test_set']
+    splitting = meta['splitting']
+    sample_size = meta['sample_size']
     noise_level = meta['Noise Level']
     perc = meta['Percentile']
-    kfolds = meta['K Folds']
+    kfolds = meta['k_folds']
     name = meta['Algorithm']
 
     # Define parent directory and specific directory
-    parentpath = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PKL'
-    foldpath = os.path.join(parentpath,
+    if not parent_path:
+        parent_path = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PKL'
+    elif parent_path:
+        parent_path = os.path.join(r'C:\Users\skolmar\PycharmProjects\Dichotomization\PKL', parent_path)
+
+    foldpath = os.path.join(parent_path,
                             str(dataset),
                             str(testset),
                             str(splitting),
