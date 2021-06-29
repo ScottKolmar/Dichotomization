@@ -152,17 +152,17 @@ class DataSet():
 
         """
         # Set class variables from function inputs
-        dataset.test_set = test_set
-        dataset.splitting = splitting
-        dataset.k_folds = k_folds
+        self.test_set = test_set
+        self.splitting = splitting
+        self.k_folds = k_folds
 
         # Set function variables from dataset class variables
-        y_dict = dataset.y_dict
-        X = dataset.X
-        y_true = dataset.y_true
-        dataset_name = dataset.name
-        sample_size = dataset.sample_size
-        num_features = dataset.num_features
+        y_dict = self.y_dict
+        X = self.X
+        y_true = self.y_true
+        dataset_name = self.name
+        sample_size = self.sample_size
+        num_features = self.num_features
 
 
         for lvl_dict in y_dict.keys():
