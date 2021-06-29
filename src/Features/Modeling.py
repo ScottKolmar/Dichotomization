@@ -10,7 +10,7 @@ import datetime
 # Import sklearn
 from scipy.stats.stats import pearsonr, ttest_ind
 from sklearn.model_selection import StratifiedKFold, KFold
-from sklearn.feature_selection import VarianceThreshold
+from sklearn.feature_selection import VarianceThreshold, SelectKBest, f_regression, f_classif, mutual_info_regression, mutual_info_classif
 from sklearn.metrics import balanced_accuracy_score
 from sklearn.metrics import f1_score
 from sklearn.metrics import roc_auc_score
@@ -21,7 +21,7 @@ from sklearn.metrics import matthews_corrcoef
 from sklearn.linear_model import LogisticRegression
 
 # Import Functions
-from src.Features.Algorithms import *
+from Features.Algorithms import *
 
 # Functions
 def count_ps(X, y):
@@ -43,7 +43,7 @@ class DataSet():
     def __init__(self, csv):
         self.csv  = csv
 
-    def load_dataframe(self, sample_size = None, num_random_var = False, num_noise_levels = 10, parent_path = None):
+    def load_dataframe(self, sample_size = None, num_random_var = False, k_best_features = None, num_noise_levels = 10, parent_path = None):
         """
         Loads instance variables for a dataSheet instance.
 
@@ -75,18 +75,6 @@ class DataSet():
         # Drop Infs
         self.df = drop_infs(self.df)
 
-        # Select X variables
-        if not num_random_var:
-            self.X = self.df.iloc[:, :-1]
-            self.num_features = len(self.X.columns)
-            self.features = self.X.columns
-        elif num_random_var:
-            feature = random_x(self.df, num_random_var)
-            self.X = self.df.loc[:, feature]
-            self.num_features = len(self.X.columns)
-            self.features = self.X.columns
-
-
         # Select y variables
         self.y_true = self.df.iloc[:, -1]
 
@@ -95,6 +83,24 @@ class DataSet():
 
         # Set optional parent_path variables
         self.parent_path = parent_path
+
+        # Select X variables
+        if k_best_features and num_random_var:
+            message = 'Must choose either k_best_features OR num_random_var, not both.'
+            return message
+
+        if not num_random_var and not k_best_features:
+            self.X = self.df.iloc[:, :-1]
+            self.num_features = len(self.X.columns)
+            self.features = self.X.columns
+        elif num_random_var:
+            feature = random_x(self.df, num_random_var)
+            self.X = self.df.loc[:, feature]
+            self.num_features = len(self.X.columns)
+            self.features = self.X.columns
+        elif k_best_features:
+            selector = SelectKBest(f_regression, k = k_best_features)
+            self.X = selector.fit_transform(X, self.y_true)
 
         return
 
