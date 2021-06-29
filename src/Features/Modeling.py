@@ -104,115 +104,127 @@ class DataSet():
 
         return
 
-def make_meta_func(dataset):
-    """
-    Takes all the attributes of a dataset object and puts them into an external meta dictionary.
+    def make_meta_func(dataset):
+        """
+        Takes all the attributes of a dataset object and puts them into an external meta dictionary.
 
-    Parameters:
-         dataset (dataset object): DataSet class object.
+        Parameters:
+            dataset (dataset object): DataSet class object.
 
-    Returns:
-        meta_dict (dict): Dictionary containing all the dataset attributes.
-    """
-    meta_dict = {}
-    for key in vars(dataset):
-        if key not in ['csv', 'df', 'X', 'y_true', 'y_dict', 'features']:
-            meta_dict[key] = vars(dataset)[key]
+        Returns:
+            meta_dict (dict): Dictionary containing all the dataset attributes.
+        """
+        meta_dict = {}
+        for key in vars(dataset):
+            if key not in ['csv', 'df', 'X', 'y_true', 'y_dict', 'features']:
+                meta_dict[key] = vars(dataset)[key]
 
-    return meta_dict
+        return meta_dict
 
-def generate_data(tups=None, k_folds= 5, splitting='Stratified', test_set = 'True', dataset = None):
-    """
-    Loops through each y column stored in y_dict (generated from sampleNoise()), generates 9
-    binary splits on percentiles 10 through 90, splits each binary split into 10 Folds by Stratified
-    KFold(), and trains a classifier/regressor pair on each fold. Takes the average BA score for each fold
-    for classifier, turns the continuous regression predictions into classes, and takes average BA score
-    from those. Saves the data in a PKL file.
+    def generate_data(self, tups=None, k_folds= 5, splitting='Stratified', test_set = 'True'):
+        """
+        Loops through each y column stored in y_dict (generated from sampleNoise()), generates 9
+        binary splits on percentiles 10 through 90, splits each binary split into 10 Folds by Stratified
+        KFold(), and trains a classifier/regressor pair on each fold. Takes the average BA score for each fold
+        for classifier, turns the continuous regression predictions into classes, and takes average BA score
+        from those. Saves the data in a PKL file.
 
-    Parameters:
-        tups (list of tuples): List of tuples containing classifier, regressor, name for several algorithms.
-        dataset (DataSet instance): DataSet class object.
-        k_folds (int): Number of folds used in KFold splitting. (Default = 5)
-        splitting (str): 'Stratified' gives StratifiedKFold splitting, and 'Normal' gives KFold splitting. (Default = 'Stratified')
-        test_set (str): Can be 'True' or 'Noise'. Determines whether the test set for modeling will have noise or not. (Default = 'True')
-    Returns:
+        Parameters:
+            tups (list of tuples): List of tuples containing classifier, regressor, name for several algorithms.
+            dataset (DataSet instance): DataSet class object.
+            k_folds (int): Number of folds used in KFold splitting. (Default = 5)
+            splitting (str): 'Stratified' gives StratifiedKFold splitting, and 'Normal' gives KFold splitting. (Default = 'Stratified')
+            test_set (str): Can be 'True' or 'Noise'. Determines whether the test set for modeling will have noise or not. (Default = 'True')
+        Returns:
 
-    """
-    # Set class variables from function inputs
-    dataset.test_set = test_set
-    dataset.splitting = splitting
-    dataset.k_folds = k_folds
+        """
+        # Set class variables from function inputs
+        dataset.test_set = test_set
+        dataset.splitting = splitting
+        dataset.k_folds = k_folds
 
-    # Set function variables from dataset class variables
-    y_dict = dataset.y_dict
-    X = dataset.X
-    y_true = dataset.y_true
-    dataset_name = dataset.name
-    sample_size = dataset.sample_size
-    num_features = dataset.num_features
+        # Set function variables from dataset class variables
+        y_dict = dataset.y_dict
+        X = dataset.X
+        y_true = dataset.y_true
+        dataset_name = dataset.name
+        sample_size = dataset.sample_size
+        num_features = dataset.num_features
 
 
-    for lvl_dict in y_dict.keys():
-        y = y_dict[lvl_dict]['y']
-        sigma = y_dict[lvl_dict]['sigma']
-        noise_level = str(lvl_dict)
+        for lvl_dict in y_dict.keys():
+            y = y_dict[lvl_dict]['y']
+            sigma = y_dict[lvl_dict]['sigma']
+            noise_level = str(lvl_dict)
 
-        # Loop through classifier/regressor pairs in tups
-        for clf, rgr, alg_name in tups:
+            # Loop through classifier/regressor pairs in tups
+            for clf, rgr, alg_name in tups:
 
-            # Define Loop for thresholds
-            threshes = [np.percentile(y, x) for x in [10, 20, 30, 40, 50, 60, 70, 80, 90]]
-            threshtup = list(zip(threshes, [10, 20, 30, 40, 50, 60, 70, 80, 90]))
-            for thresh, perc in threshtup:
+                # Define Loop for thresholds
+                threshes = [np.percentile(y, x) for x in [10, 20, 30, 40, 50, 60, 70, 80, 90]]
+                threshtup = list(zip(threshes, [10, 20, 30, 40, 50, 60, 70, 80, 90]))
+                for thresh, perc in threshtup:
 
-                # Define estimator tuple
-                estimator = [clf, rgr, alg_name]
+                    # Define estimator tuple
+                    estimator = [clf, rgr, alg_name]
 
-                # Define meta dictionary from dataset attributes
-                meta = make_meta_func(dataset)
+                    # Define meta dictionary from dataset attributes
+                    meta = make_meta_func(dataset)
 
-                # Fill in meta dictionary from loop specific variables
-                meta['Threshold'] = thresh
-                meta['Percentile'] = perc
-                meta['Algorithm'] = alg_name
-                meta['Noise Level'] = noise_level
-                meta['Sigma'] = sigma
-                meta['Estimator'] = estimator
+                    # Fill in meta dictionary from loop specific variables
+                    meta['Threshold'] = thresh
+                    meta['Percentile'] = perc
+                    meta['Algorithm'] = alg_name
+                    meta['Noise Level'] = noise_level
+                    meta['Sigma'] = sigma
+                    meta['Estimator'] = estimator
 
-                # meta = make_meta(dataset=dataset_name,
-                #                 sample_size=sample_size,
-                #                 thresh=thresh,
-                #                 perc=perc,
-                #                 algorithm=alg_name,
-                #                 noise_level=noise_level,
-                #                 sigma=sigma,
-                #                 k_folds=k_folds,
-                #                 splitting=splitting,
-                #                 testset=testset,
-                #                 estimator=estimator)
+                    # meta = make_meta(dataset=dataset_name,
+                    #                 sample_size=sample_size,
+                    #                 thresh=thresh,
+                    #                 perc=perc,
+                    #                 algorithm=alg_name,
+                    #                 noise_level=noise_level,
+                    #                 sigma=sigma,
+                    #                 k_folds=k_folds,
+                    #                 splitting=splitting,
+                    #                 testset=testset,
+                    #                 estimator=estimator)
 
-                # Make a k-fold split and get a classifier and regressor score for each split
-                BA = get_clf_rgr_scores(meta=meta, thresh = thresh, k_folds = k_folds, X=X, y=y, y_true=y_true, clf=clf, rgr=rgr, splitting=splitting)
+                    # Make a k-fold split and get a classifier and regressor score for each split
+                    BA = get_clf_rgr_scores(meta=meta, thresh = thresh, k_folds = k_folds, X=X, y=y, y_true=y_true, clf=clf, rgr=rgr, splitting=splitting)
 
-                # Save PKL file
-                save_pkl(BA=BA, parent_path = dataset.parent_path)
+                    # Save PKL file
+                    save_pkl(BA=BA, parent_path = dataset.parent_path)
 
-                print('Dataset: {}\n Noise Level: {}\n Split: {}\n Variables: {}\n'.format(dataset_name,
-                                                                                           noise_level,
-                                                                                           perc,
-                                                                                           num_features))
-                for key in BA[1].keys():
-                    print('{} Classifier {}: {} +/- {}'.format(meta['Algorithm'],
-                                                               key,
-                                                               np.average(BA[1][key][0]['Clfs']),
-                                                               np.std(BA[1][key][0]['Clfs'])))
-                    print('{} Regressor {}: {} +/- {}'.format(meta['Algorithm'],
-                                                              key,
-                                                              np.average(BA[1][key][1]['Rgrs']),
-                                                              np.std(BA[1][key][1]['Rgrs'])))
-                print('\n')
+                    print('Dataset: {}\n Noise Level: {}\n Split: {}\n Variables: {}\n'.format(dataset_name,
+                                                                                            noise_level,
+                                                                                            perc,
+                                                                                            num_features))
+                    for key in BA[1].keys():
+                        print('{} Classifier {}: {} +/- {}'.format(meta['Algorithm'],
+                                                                key,
+                                                                np.average(BA[1][key][0]['Clfs']),
+                                                                np.std(BA[1][key][0]['Clfs'])))
+                        print('{} Regressor {}: {} +/- {}'.format(meta['Algorithm'],
+                                                                key,
+                                                                np.average(BA[1][key][1]['Rgrs']),
+                                                                np.std(BA[1][key][1]['Rgrs'])))
+                    print('\n')
 
-    return None
+        return None
+
+    def scale_x(self):
+        """
+
+        Uses StandardScaler() to scale X data of the dataset.
+        """
+        scaler = StandardScaler()
+        scaled_X = scaler.fit_transform(self.X)
+        scaled_df = pd.DataFrame(scaled_X, index = self.X.index, columns = self.X.columns)
+        self.X = scaled_df
+
+        return None
 
 
 def random_x(df, num):
