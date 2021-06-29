@@ -63,13 +63,15 @@ class DataSet():
         # Set name variable
         self.name = self.csv.split('.')[0].split('_')[0].split('\\')[6]
 
-        # Sample the dataframe
-        try:
+        # Sample the dataframe, exiting the function if sample size is too big
+        if sample_size > self.df.shape[0]:
+            message = 'The sample_size must be smaller than the size of the dataset, which is: {}'.format(self.df.shape[0])
+            return print(message)
+        
+        else:
             self.df = self.df.sample(sample_size)
-        except ValueError:
-            print('The sample_size must be smaller than the size of the dataset, which is: {}'.format(self.df.shape[0]))
 
-        # Set sample_size variable, which should come after try block in case of failure
+        # Set sample_size variable
         self.sample_size = sample_size
 
         # Drop Infs
@@ -84,23 +86,34 @@ class DataSet():
         # Set optional parent_path variables
         self.parent_path = parent_path
 
-        # Select X variables
+        # Exit function if both k_best_features and num_random_var are selected
         if k_best_features and num_random_var:
             message = 'Must choose either k_best_features OR num_random_var, not both.'
-            return message
+            return print(message)
 
+        # If no special feature selection, assign regular dataset variables
         if not num_random_var and not k_best_features:
             self.X = self.df.iloc[:, :-1]
             self.num_features = len(self.X.columns)
             self.features = self.X.columns
+        
+        # Select the random feature variables and update the dataset variables
         elif num_random_var:
             feature = random_x(self.df, num_random_var)
             self.X = self.df.loc[:, feature]
             self.num_features = len(self.X.columns)
             self.features = self.X.columns
+        
+        # Select the k best features and update the dataset variables
         elif k_best_features:
             selector = SelectKBest(f_regression, k = k_best_features)
-            self.X = selector.fit_transform(X, self.y_true)
+            X = self.df.iloc[:,:-1]
+            X_new = selector.fit_transform(X, self.y_true)
+            X_col_nums = selector.get_support(indices=True)
+            features_df_new = X.iloc[:,X_col_nums]
+            self.X = features_df_new
+            self.num_features = len(self.X.columns)
+            self.features = self.X.columns
 
         return
 
