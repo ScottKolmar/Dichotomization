@@ -39,6 +39,84 @@ def makeAlgList():
 
     return tups
 
+def make_opt_algs(X, y):
+    """
+
+    Optimizes algorithms via GridSearchCV and returns a tuple of optimized clfs and rgrs.
+
+    Inputs:
+    X (dataframe): Feature variables of a dataset.
+    y (Series): Target variable of a dataset.
+    """
+
+    # Instantiate Classifiers
+    knn = KNeighborsClassifier(weights='distance')
+    dt = DecisionTreeClassifier(max_features= 'auto', criterion= 'gini')
+    svc = SVC(probability=True)
+    rf = RandomForestClassifier(criterion= 'gini')
+    clf_list = [knn, dt, svc, rf]
+
+    # Instantiate Regressors
+    knnr = KNeighborsRegressor(weights='distance')
+    dtr = DecisionTreeRegressor(max_features= 'auto', criterion= 'mse')
+    svr = SVR()
+    rfr = RandomForestRegressor(criterion= 'mse')
+    rgr_list = [knnr, dtr, svr, rfr]
+
+    # Define rgr param grids
+    dt_dict = {
+        'max_depth': [50, 100, 200, 500],
+        'min_samples_split': [2, 5, 10, 20, 40],
+        'min_samples_leaf': [1, 5, 10, 20]
+        }
+
+    knn_dict = {
+        'n_neighbors': np.arange(2, 22, 1)
+        }
+
+    svm_dict = {
+        'kernel': ['linear', 'sigmoid', 'rbf'],
+        'C': [1, 2, 5, 10]
+        }
+
+    rf_dict = {
+        'n_estimators': [25, 50, 100, 200, 300, 500],
+        'max_depth': [50, 100, 200, 500],
+        'min_samples_split': [2, 5, 10, 20, 40],
+        'min_samples_leaf': [1, 5, 10, 20]
+        }
+
+    # Make rgr GridSearch
+    knn_search = GridSearchCV(estimator = knnr, param_grid = knn_dict, n_jobs = -1, verbose= 10)
+    dt_search = GridSearchCV(estimator = dtr, param_grid = dt_dict, n_jobs = -1, verbose= 10)
+    svm_search = GridSearchCV(estimator = svr, param_grid = svm_dict, n_jobs = -1, verbose= 10)
+    rf_search = GridSearchCV(estimator = rfr, param_grid = rf_dict, n_jobs = -1, verbose= 10)
+    rgr_searches = [knn_search, dt_search, svm_search, rf_search]
+
+    # Make names and zip into tuples
+    gridnames = ['KNNOpt', 'DTOpt', 'SVMOpt', 'RFOpt']
+
+    # Fit searches
+    for i,search in enumerate(rgr_searches):
+        
+        # Fit the gridsearch
+        search.fit(X, y)
+        rgr_opt_params = search.best_params_
+
+        # Set the parameters of the regressor
+        rgr = rgr_list[i]
+        rgr.set_params(**rgr_opt_params)
+
+        # Set the parameters of the classifier
+        clf = clf_list[i]
+        clf.set_params(**rgr_opt_params)
+
+    # Reinstantiate as new tuple and add to list
+    names = ['KNN', 'DT', 'SVM', 'RF']
+    tups = list(zip(clf_list, rgr_list, names))
+
+    return tups
+
 def makePipes(n_components = None, pred_prob = False):
     # Instantiate Preprocessing and PCA
     scale = StandardScaler()
@@ -90,13 +168,13 @@ def makeOptPipes():
     pca = PCA()
 
     # Instantiate Classifiers
-    knn = KNeighborsClassifier(weights= 'distance')
+    knn = KNeighborsClassifier()
     dt = DecisionTreeClassifier(max_features= 'auto', criterion= 'gini')
     svc = SVC()
     rf = RandomForestClassifier(criterion= 'gini')
 
     # Instantiate Regressors
-    knnr = KNeighborsRegressor(weights= 'distance')
+    knnr = KNeighborsRegressor()
     dtr = DecisionTreeRegressor(max_features= 'auto', criterion= 'mse')
     svr = SVR()
     rfr = RandomForestRegressor(criterion= 'mse')
