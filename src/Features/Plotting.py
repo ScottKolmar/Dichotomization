@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import pickle
 import os
-from src.Features.Modeling import *
+from Features.Modeling import *
 
 # Functions
 class scoreSheet():
@@ -54,7 +54,7 @@ class scoreSheet():
             self.__getattribute__(str(key))['clf'] = self.__getattribute__(str(key))['clf'].append(clf_data, ignore_index=True)
             self.__getattribute__(str(key))['rgr'] = self.__getattribute__(str(key))['rgr'].append(rgr_data, ignore_index=True)
 
-def plot_scores(rootdir, search_dict = None):
+def plot_scores(rootdir, search_dict = None, png_path = None):
     """
 
     Parameters:
@@ -62,7 +62,7 @@ def plot_scores(rootdir, search_dict = None):
                     i.e. '...\\PKL\\g298atom'. The end of the path will be used to assign the dataset in the output
                     PNG file.
     search_dict (dict): Dictionary for finding the PKL files of interest. The keys for the dictionary must be found in
-                        the meta_dictionary of the PKL files. For example, 'Algorithm', 'Noise', 'Testset', etc. This
+                        the meta_dictionary of the PKL files. For example, 'Algorithm', 'Noise', 'test_set', etc. This
                         dictionary will filter the files for building the plots.
 
     Returns:
@@ -118,11 +118,14 @@ def plot_scores(rootdir, search_dict = None):
                 plt.title(search_dict['Algorithm'] + ' ' + str(df_clf['Noise Level'].iloc[0]))
 
                 # Define directory path for PNG file from PKL file path
-                pngparent = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PNG'
-                dataset = str(df_clf['Dataset'].iloc[0])
-                testset = str(df_clf['Test Set'].iloc[0])
-                splitting = str(df_clf['Splitting'].iloc[0])
-                sample_size = str(df_clf['Sample Size'].iloc[0])
+                if not png_path:
+                    pngparent = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PNG'
+                else:
+                    pngparent = png_path
+                dataset = str(df_clf['name'].iloc[0])
+                testset = str(df_clf['test_set'].iloc[0])
+                splitting = str(df_clf['splitting'].iloc[0])
+                sample_size = str(df_clf['sample_size'].iloc[0])
                 noise = str(df_clf['Noise Level'].iloc[0])
                 pngfoldpath = os.path.join(pngparent, dataset, testset, splitting, sample_size, noise)
 
@@ -136,7 +139,7 @@ def plot_scores(rootdir, search_dict = None):
                                                                    splitting,
                                                                    sample_size,
                                                                    noise,
-                                                                   df_clf['K Folds'].iloc[0],
+                                                                   df_clf['k_folds'].iloc[0],
                                                                    df_clf['Score Name'].iloc[0],
                                                                    search_dict['Algorithm'])
 
