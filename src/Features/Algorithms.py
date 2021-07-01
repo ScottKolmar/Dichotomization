@@ -12,13 +12,14 @@ from sklearn.svm import SVR, SVC
 from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
 
-def makeAlgList():
+def make_algs(param_dicts = None):
     """
     Makes a list of tuples of classifier, regressor, and name for each algorithm. Currently KNN, DT, SVM, and RF.
 
     Returns:
          tups (list): List of tuples (classifier, regressor, name).
     """
+
     # Instantiate Classifiers
     knn = KNeighborsClassifier()
     dt = DecisionTreeClassifier()
@@ -32,6 +33,28 @@ def makeAlgList():
     svr = SVR()
     rfr = RandomForestRegressor()
     rgrs = [knnr, dtr, svr, rfr]
+
+    # If param_dicts supplied, set parameters of algorithms
+    if param_dicts:
+        if 'KNN' in param_dicts.keys():
+            knn_dict = param_dicts['KNN']
+            knn.set_params(**knn_dict)
+            knnr.set_params(**knn_dict)
+        
+        if 'DT' in param_dicts.keys():
+            dt_dict = param_dicts['DT']
+            dt.set_params(**dt_dict)
+            dtr.set_params(**dt_dict)
+
+        if 'SVM' in param_dicts.keys():
+            svm_dict = param_dicts['SVM']
+            svc.set_params(**svm_dict)
+            svr.set_params(**svm_dict)
+
+        if 'RF' in param_dicts.keys():
+            rf_dict = param_dicts['RF']
+            rf.set_params(**rf_dict)
+            rfr.set_params(**rf_dict)
 
     # Provide names and zip together
     names = ['KNN', 'DT', 'SVM', 'RF']
