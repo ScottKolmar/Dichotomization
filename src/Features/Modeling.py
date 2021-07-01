@@ -43,14 +43,13 @@ class DataSet():
     def __init__(self, csv):
         self.csv  = csv
 
-    def load_dataframe(self, sample_size = None, num_random_var = False, k_best_features = None, num_noise_levels = 10, parent_path = None):
+    def load_dataframe(self, sample_size = None, num_noise_levels = 10, parent_path = None):
         """
         Loads instance variables for a dataSheet instance.
 
         Parameters:
         csv (CSV): Descriptor file to load.
-        sample_size (int): Number of entries to sample from the dataset.
-        num_random_var (int): Number of random variables to select. If False, all data will be selected. (Default = False)
+        sample_size (int): Number of entries to sample from the dataset. (Default = None)
         num_noise_levels (int): Number of noise levels to generate. (Default = 10)
         parent_path (string): Custom folder to save results in, if desired. (Default = None)
 
@@ -63,14 +62,19 @@ class DataSet():
         # Set name variable
         self.name = self.csv.split('.')[0].split('_')[0].split('\\')[6]
 
-        # Sample the dataframe, exiting the function if sample size is too big
+        # Set sample size class variable to the number of rows if None
+        if sample_size is None:
+            sample_size = self.df.shape[0]
+
+        # Exit function if sample size is too big
         if sample_size > self.df.shape[0]:
             message = 'The sample_size must be smaller than the size of the dataset, which is: {}'.format(self.df.shape[0])
             return print(message)
-        
-        else:
-            self.df = self.df.sample(sample_size)
 
+        # Sample the dataframe
+        if sample_size:
+            self.df = self.df.sample(sample_size)
+        
         # Set sample_size variable
         self.sample_size = sample_size
 
@@ -86,38 +90,38 @@ class DataSet():
         # Set optional parent_path variables
         self.parent_path = parent_path
 
-        # Exit function if both k_best_features and num_random_var are selected
-        if k_best_features and num_random_var:
-            message = 'Must choose either k_best_features OR num_random_var, not both.'
-            return print(message)
-
-        # If no special feature selection, assign regular dataset variables
-        if not num_random_var and not k_best_features:
-            self.X = self.df.iloc[:, :-1]
-            self.num_features = len(self.X.columns)
-            self.features = self.X.columns
+        # Set X and other dataset variables
+        self.X = self.df.iloc[:, :-1]
+        self.num_features = len(self.X.columns)
+        self.features = self.X.columns
         
-        # Select the random feature variables and update the dataset variables
-        elif num_random_var:
-            feature = random_x(self.df, num_random_var)
-            self.X = self.df.loc[:, feature]
-            self.num_features = len(self.X.columns)
-            self.features = self.X.columns
-        
-        # Select the k best features and update the dataset variables
-        elif k_best_features:
-            selector = SelectKBest(f_regression, k = k_best_features)
-            X = self.df.iloc[:,:-1]
-            X_new = selector.fit_transform(X, self.y_true)
-            X_col_nums = selector.get_support(indices=True)
-            features_df_new = X.iloc[:,X_col_nums]
-            self.X = features_df_new
-            self.num_features = len(self.X.columns)
-            self.features = self.X.columns
+        # Set preprocessing variables to false
+        self.var_filter_ = {'filtered': False, 'Value': None}
+        self.random_features_ = {'filtered': False, 'Value': None}
+        self.drop_corr_ = {'filtered': False, 'Value': None}
+        self.scaled_ = False
+        self.select_k_best_ = {'filtered': False, 'Value': None}
 
-        return
+        return None
+    
+    def select_random_features(self, num_features):
+        """
 
-    def make_meta_func(dataset):
+        Selects a random number of feature variables.
+        """
+
+        # Select features
+        feature = random_x(self.df, num_features)
+
+        # Reassign dataset variables
+        self.X = self.df.loc[:, feature]
+        self.num_features = len(self.X.columns)
+        self.features = self.X.columns
+        self.random_features_ = {'filtered': True, 'Value': num_features}
+
+        return None
+
+    def make_meta_func(self):
         """
         Takes all the attributes of a dataset object and puts them into an external meta dictionary.
 
@@ -128,9 +132,9 @@ class DataSet():
             meta_dict (dict): Dictionary containing all the dataset attributes.
         """
         meta_dict = {}
-        for key in vars(dataset):
-            if key not in ['csv', 'df', 'X', 'y_true', 'y_dict', 'features']:
-                meta_dict[key] = vars(dataset)[key]
+        for key in vars(self):
+            if key not in ['csv', 'df', 'X', 'y_true', 'y_dict']:
+                meta_dict[key] = vars(self)[key]
 
         return meta_dict
 
@@ -182,7 +186,7 @@ class DataSet():
                     estimator = [clf, rgr, alg_name]
 
                     # Define meta dictionary from dataset attributes
-                    meta = make_meta_func(dataset)
+                    meta = self.make_meta_func()
 
                     # Fill in meta dictionary from loop specific variables
                     meta['Threshold'] = thresh
@@ -208,7 +212,7 @@ class DataSet():
                     BA = get_clf_rgr_scores(meta=meta, thresh = thresh, k_folds = k_folds, X=X, y=y, y_true=y_true, clf=clf, rgr=rgr, splitting=splitting)
 
                     # Save PKL file
-                    save_pkl(BA=BA, parent_path = dataset.parent_path)
+                    save_pkl(BA=BA, parent_path = self.parent_path)
 
                     print('Dataset: {}\n Noise Level: {}\n Split: {}\n Variables: {}\n'.format(dataset_name,
                                                                                             noise_level,
@@ -236,14 +240,112 @@ class DataSet():
         scaled_X = scaler.fit_transform(self.X)
         scaled_df = pd.DataFrame(scaled_X, index = self.X.index, columns = self.X.columns)
         self.X = scaled_df
+        self.scaled_ = True
 
         return None
+
+    def drop_low_variance_features(self, threshold = 0):
+        """
+
+        Drops features with variance below a certain threshold
+        """
+
+        # Get variance and assign to dataframe where feature variables are rows
+        variance = self.X.var()
+        df_var = pd.DataFrame(data = {'variance': variance}, index = self.X.columns)
+
+        # Drop the low variance rows
+        df_low_v_dropped = df_var[df_var['variance'] > threshold]
+
+        # Filter the dataset's X dataframe by the selected feature variables
+        self.X = self.X[df_low_v_dropped.index]
+
+        # Reassign dataset variables
+        self.num_features = len(self.X.columns)
+        self.features = self.X.columns
+        self.var_filter_ = {'filtered': True, 'Value': threshold}
+
+        return None
+    
+    def drop_correlated_features(self, threshold = 0.95):
+        """
+
+        Drops correlated feature variables above the supplied threshold.
+        """
+
+        # Create correlation matrix
+        corr_matrix = self.X.corr().abs()
+
+        # Select upper triangle of correlation matrix
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+
+        # Find features with correlation greater than 0.95
+        to_drop = [column for column in upper.columns if any(upper[column] > threshold)]
+
+        # Drop features
+        self.X.drop(to_drop, axis=1, inplace=True)
+
+        # Reassign dataset variables
+        self.num_features = len(self.X.columns)
+        self.features = self.X.columns
+        self.drop_corr_ = {'filtered': True, 'Value': threshold}
+
+        return None
+    
+    def select_k_best_features(self, k_features):
+        """
+
+        Selects the best k features using f score.
+        """
+        # Select the k best features
+        selector = SelectKBest(f_regression, k = k_features)
+        X_new = selector.fit_transform(self.X, self.y_true)
+        X_col_nums = selector.get_support(indices=True)
+
+        # Update dataset variables
+        self.X = self.X.iloc[:, X_col_nums]
+        self.num_features = len(self.X.columns)
+        self.features = self.X.columns
+        self.select_k_best_ = {'filtered': True, 'Value': k_features}
+
+        return None
+    
+    def compare_feature_statistics(self):
+        """
+
+        Use statistics function of choice to get scores and p-values for each feature in a dataset.
+        """
+
+        # Compute continuous stats
+        f_stats, p_vals = f_regression(self.X,self.y_true)
+        m_i = mutual_info_regression(self.X, self.y_true)
+
+        # Vectorize binning function
+        twobin_v = np.vectorize(two_binner)
+
+        # Define y_class and compute class stats
+        thresh = np.median(self.y_true)
+        y_class = twobin_v(self.y_true, thresh=thresh)
+        f_stats_class, p_vals_class = f_classif(self.X,y_class)
+        m_i_class = mutual_info_classif(self.X, y_class)
+
+        # Create dataframe
+        df_stats = pd.DataFrame(data = {
+            'f_stats': f_stats,
+            'p_vals': p_vals,
+            'm_i': m_i,
+            'f_stats_class': f_stats_class,
+            'p_vals_class': p_vals_class,
+            'm_i_class': m_i_class
+            },
+            index = self.X.columns)
+
+        return df_stats
 
 
 def random_x(df, num):
     """
-    Selects a random X variable Series from a dataframe and returns that Series. Filters for variables with variance
-    larger than 0.99.
+    Selects a random X variable.
 
     Parameters:
     df (dataframe): Dataframe to select from.
@@ -253,16 +355,11 @@ def random_x(df, num):
         feature (Series name)
     """
     # Identify X variable columns
-    X_Vars = df.iloc[:, :-1]
+    X = df.iloc[:, :-1]
 
-    # Set variance threshold and filter the X variables
-    var = VarianceThreshold(threshold=0.99)
-    var.fit_transform(X_Vars)
-
-    # Select a random variable from the filtered X variable list
-    columns = list(X_Vars.columns)
-    feat_list = list(compress(columns, var.get_support()))
-    feature = random.sample(feat_list, num)
+    # Select a random variable
+    columns = list(X.columns)
+    feature = random.sample(columns, num)
 
     return feature
 
