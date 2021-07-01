@@ -28,6 +28,10 @@ class scoreSheet():
         meta = BA[0]
         scores = BA[1]
 
+        # Remove key-value pairs from meta dict that cause problems for Pandas
+        del meta['features']
+        del meta['Estimator']
+
         # Iterate through each score
         for key in scores.keys():
             clfs = scores[key][0]['Clfs']
