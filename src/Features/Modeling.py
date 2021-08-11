@@ -8,7 +8,7 @@ import random
 import datetime
 
 # Import sklearn
-from scipy.stats.stats import pearsonr, ttest_ind
+from scipy.stats.stats import pearsonr, spearmanr, ttest_ind
 from sklearn.model_selection import StratifiedKFold, KFold
 from sklearn.feature_selection import VarianceThreshold, SelectKBest, f_regression, f_classif, mutual_info_regression, mutual_info_classif
 from sklearn.metrics import balanced_accuracy_score
@@ -101,6 +101,7 @@ class DataSet():
         self.drop_corr_ = {'filtered': False, 'Value': None}
         self.scaled_ = False
         self.select_k_best_ = {'filtered': False, 'Value': None}
+        self.optimized_on_ = 'Not Optimized'
 
         return None
     
@@ -138,7 +139,7 @@ class DataSet():
 
         return meta_dict
 
-    def generate_data(self, tups=None, k_folds= 5, splitting='Stratified', test_set = 'True'):
+    def generate_data(self, k_folds= 5, splitting='Stratified', test_set = 'True'):
         """
         Loops through each y column stored in y_dict (generated from sampleNoise()), generates 9
         binary splits on percentiles 10 through 90, splits each binary split into 10 Folds by Stratified
@@ -167,6 +168,7 @@ class DataSet():
         dataset_name = self.name
         sample_size = self.sample_size
         num_features = self.num_features
+        tups = self.tups
 
 
         for lvl_dict in y_dict.keys():
@@ -319,6 +321,12 @@ class DataSet():
         # Compute continuous stats
         f_stats, p_vals = f_regression(self.X,self.y_true)
         m_i = mutual_info_regression(self.X, self.y_true)
+        sp_corrs = []
+        sp_ps = []
+        for col in self.X.columns:
+            sp_corr, sp_p = spearmanr(self.X[col], self.y_true)
+            sp_corrs.append(sp_corr)
+            sp_ps.append(sp_p)
 
         # Vectorize binning function
         twobin_v = np.vectorize(two_binner)
@@ -328,20 +336,140 @@ class DataSet():
         y_class = twobin_v(self.y_true, thresh=thresh)
         f_stats_class, p_vals_class = f_classif(self.X,y_class)
         m_i_class = mutual_info_classif(self.X, y_class)
+        sp_corrs_class = []
+        sp_ps_class = []
+        for col in self.X.columns:
+            sp_corr_class, sp_p_class = spearmanr(self.X[col], y_class)
+            sp_corrs_class.append(sp_corr_class)
+            sp_ps_class.append(sp_p_class)
 
         # Create dataframe
         df_stats = pd.DataFrame(data = {
             'f_stats': f_stats,
             'p_vals': p_vals,
             'm_i': m_i,
+            'sp_corrs': sp_corrs,
+            'sp_ps': sp_ps,
             'f_stats_class': f_stats_class,
             'p_vals_class': p_vals_class,
-            'm_i_class': m_i_class
+            'm_i_class': m_i_class,
+            'sp_corrs_class': sp_corrs_class,
+            'sp_ps_class': sp_ps_class
             },
             index = self.X.columns)
 
         return df_stats
+    
+    def make_opt_algs(self, optimize_on = ['Continuous', 'Categorical']):
+        """
 
+        Optimizes algorithms via GridSearchCV and returns a tuple of optimized clfs and rgrs.
+
+        Inputs:
+        X (dataframe): Feature variables of a dataset.
+        y (Series): Target variable of a dataset.
+        optimize_on (String): 'Continuous' will optimize on continuous dataset, and 'Categorical' will optimize on categorical dataset.
+        """
+
+        # Instantiate Classifiers
+        knn = KNeighborsClassifier(weights='distance')
+        dt = DecisionTreeClassifier(max_features= 'auto', criterion= 'gini')
+        svc = SVC(probability=True)
+        rf = RandomForestClassifier(criterion= 'gini')
+        clf_list = [knn, dt, svc, rf]
+
+        # Instantiate Regressors
+        knnr = KNeighborsRegressor(weights='distance')
+        dtr = DecisionTreeRegressor(max_features= 'auto', criterion= 'mse')
+        svr = SVR()
+        rfr = RandomForestRegressor(criterion= 'mse')
+        rgr_list = [knnr, dtr, svr, rfr]
+
+        # Define rgr param grids
+        dt_dict = {
+            'max_depth': [50, 100, 200, 500],
+            'min_samples_split': [2, 5, 10, 20, 40],
+            'min_samples_leaf': [1, 5, 10, 20]
+            }
+
+        knn_dict = {
+            'n_neighbors': np.arange(2, 22, 1)
+            }
+
+        svm_dict = {
+            'kernel': ['linear', 'sigmoid', 'rbf'],
+            'C': [1, 2, 5, 10]
+            }
+
+        rf_dict = {
+            'n_estimators': [25, 50, 100, 200, 300, 500],
+            'max_depth': [50, 100, 200, 500],
+            'min_samples_split': [2, 5, 10, 20, 40],
+            'min_samples_leaf': [1, 5, 10, 20]
+            }
+
+        if optimize_on == 'Continuous':
+            
+            # Make rgr GridSearch
+            knn_search = GridSearchCV(estimator = knnr, param_grid = knn_dict, n_jobs = -1, verbose= 10)
+            dt_search = GridSearchCV(estimator = dtr, param_grid = dt_dict, n_jobs = -1, verbose= 10)
+            svm_search = GridSearchCV(estimator = svr, param_grid = svm_dict, n_jobs = -1, verbose= 10)
+            rf_search = GridSearchCV(estimator = rfr, param_grid = rf_dict, n_jobs = -1, verbose= 10)
+            searches = [knn_search, dt_search, svm_search, rf_search]
+
+            # Set y to be continuous
+            y = self.y_true
+
+            # Set dataset variable
+            self.optimized_on_ = 'Continuous'
+
+        elif optimize_on == 'Categorical':
+
+            # Set scoring function as multiple metrics
+            scoring = ['balanced_accuracy', 'f1', 'roc_auc', 'neg_brier_score']
+
+            # Make clf GridSearch
+            knn_search = GridSearchCV(estimator = knn, param_grid = knn_dict, n_jobs = -1, verbose= 10, scoring= scoring, refit = 'f1')
+            dt_search = GridSearchCV(estimator = dt, param_grid = dt_dict, n_jobs = -1, verbose= 10, scoring= scoring, refit = 'f1')
+            svm_search = GridSearchCV(estimator = svc, param_grid = svm_dict, n_jobs = -1, verbose= 10, scoring= scoring, refit = 'f1')
+            rf_search = GridSearchCV(estimator = rf, param_grid = rf_dict, n_jobs = -1, verbose= 10, scoring= scoring, refit = 'f1')
+            searches = [knn_search, dt_search, svm_search, rf_search]
+
+            # Set y to be categorical
+            # Vectorize binning function
+            twobin_v = np.vectorize(two_binner)
+            thresh = np.median(self.y_true)
+            y = twobin_v(self.y_true, thresh = thresh)
+
+            # Set dataset variable
+            self.optimized_on_ = 'Categorical: {}'.format(thresh)
+
+        # Make names and zip into tuples
+        gridnames = ['KNNOpt', 'DTOpt', 'SVMOpt', 'RFOpt']
+
+        # Fit searches
+        for i,search in enumerate(searches):
+            
+            # Fit the gridsearch
+            search.fit(self.X, y)
+            opt_params = search.best_params_
+
+            # Set the parameters of the regressor
+            rgr = rgr_list[i]
+            rgr.set_params(**opt_params)
+
+            # Set the parameters of the classifier
+            clf = clf_list[i]
+            rgr.set_params(**opt_params)
+
+        # Reinstantiate as new tuple and add to list
+        names = ['KNN', 'DT', 'SVM', 'RF']
+        tups = list(zip(clf_list, rgr_list, names))
+
+        # Set dataset variables
+        self.tups = tups
+
+        return None
 
 def random_x(df, num):
     """
@@ -537,13 +665,15 @@ def get_clf_rgr_scores(meta= None, thresh = None, k_folds = None, X= None, y= No
     Pearsphi_rgrs = []
     dict_Pearsphi_rgrs = {'Rgrs': Pearsphi_rgrs}
 
-    scores = {'BA': [dict_BA_clfs, dict_BA_rgrs],
-              'F1': [dict_F1_clfs, dict_F1_rgrs],
-              'ROC-AUC': [dict_ROCAUC_clfs, dict_ROCAUC_rgrs],
-              'Brier': [dict_Brier_clfs, dict_Brier_rgrs],
-              'Kappa': [dict_Kappa_clfs, dict_Kappa_rgrs],
-              'Logloss': [dict_Logloss_clfs, dict_Logloss_rgrs],
-              'Pearsphi': [dict_Pearsphi_clfs, dict_Pearsphi_rgrs]}
+    scores = {
+        'BA': [dict_BA_clfs, dict_BA_rgrs],
+        'F1': [dict_F1_clfs, dict_F1_rgrs],
+        'ROC-AUC': [dict_ROCAUC_clfs, dict_ROCAUC_rgrs],
+        'Brier': [dict_Brier_clfs, dict_Brier_rgrs],
+        'Kappa': [dict_Kappa_clfs, dict_Kappa_rgrs],
+        'Logloss': [dict_Logloss_clfs, dict_Logloss_rgrs],
+        'Pearsphi': [dict_Pearsphi_clfs, dict_Pearsphi_rgrs]
+        }
 
     BA = [meta, scores]
 
@@ -556,7 +686,7 @@ def get_clf_rgr_scores(meta= None, thresh = None, k_folds = None, X= None, y= No
         X_test = X.iloc[test_index, :]
         y_test_class = y_true_class.iloc[test_index]
 
-        # Fit and predict with clf and get scores
+        # Fit Clf
         clf.fit(X_train, y_train_class.values.ravel())
 
         # Classifier probabilistic scores
@@ -564,7 +694,6 @@ def get_clf_rgr_scores(meta= None, thresh = None, k_folds = None, X= None, y= No
         roc_score_clf = roc_auc_score(y_test_class, y_prob_clf[:,1])
         brier_score_clf = brier_score_loss(y_test_class, y_prob_clf[:,1])
         logloss_score_clf = log_loss(y_test_class, y_prob_clf[:,1])
-
 
         # Classifier append probabilistic scores
         ROCAUC_clfs.append(roc_score_clf)
@@ -599,8 +728,6 @@ def get_clf_rgr_scores(meta= None, thresh = None, k_folds = None, X= None, y= No
             print('One class in Logistic Regressions Test set')
             logregerror = True
             pass
-
-
 
         # Add if clause for if Logistic Regression passed
         if logregerror:
