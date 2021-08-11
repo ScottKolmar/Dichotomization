@@ -94,6 +94,12 @@ class DataSet():
         self.X = self.df.iloc[:, :-1]
         self.num_features = len(self.X.columns)
         self.features = self.X.columns
+
+        # Set empty splitting and train test split variables
+        self.k_folds = None
+        self.splitting = None
+        self.train = None
+        self.test = None
         
         # Set preprocessing variables to false
         self.var_filter_ = {'filtered': False, 'Value': None}
@@ -102,6 +108,68 @@ class DataSet():
         self.scaled_ = False
         self.select_k_best_ = {'filtered': False, 'Value': None}
         self.optimized_on_ = 'Not Optimized'
+
+        return None
+    
+    def k_fold_split_train_test(self, n_folds, split_method = 'Random'):
+
+        # Add Clause for KFold versus StratifiedKFold
+        if split_method == 'Stratified':
+            skf = StratifiedKFold(n_splits=n_folds)
+            skf.get_n_splits(self.X, self.y_true)
+
+        elif split_method == 'Random':
+            skf = KFold(n_splits= n_folds)
+            skf.get_n_splits(self.X, self.y_true)
+
+        self.training_sets = {'X_train': [], 'y_train': []}
+        self.testing_sets = {'X_test': [], 'y_test': []}
+
+        # Loop through splits
+        for train_index, test_index in skf.split(self.X, self.y_true):
+            # Get training and test sets from indices
+            X_train = self.X.iloc[train_index, :]
+            y_train = self.y_true.iloc[train_index]
+            X_test = self.X.iloc[test_index, :]
+            y_test = self.y_true.iloc[test_index]
+
+            # Set class variables
+            self.training_sets['X_train'].append(X_train)
+            self.training_sets['y_train'].append(y_train)
+            self.testing_sets['X_test'].append(X_test)
+            self.testing_sets['y_test'].append(y_test)
+
+        return None
+
+    def split_train_test(self, percentage):
+
+        # Raise error if kfold splitting already set
+        if self.k_folds or self.splitting:
+            return print("Cannot use train test split and kfold splitting simultaneously.")
+
+        # split dataset into train and test sets
+        self.train = self.df.sample(frac=percentage)
+        self.test = self.df.loc[~self.df.index.isin(self.train.index)]
+
+        # Set other conflicting variables
+        self.k_folds = None
+        self.splitting = None
+    
+        return None
+    
+    def set_k_fold_params(self, k_folds, splitting):
+
+        # Raise error if training and test set chosen
+        if not self.train.empty or self.test.empty:
+            return print("Cannot use kfold splitting and train test split simultaneously.")
+
+        # Set class variables according to function inputs
+        self.k_folds = k_folds
+        self.splitting = splitting
+
+        # Set conflicting variables
+        self.train = None
+        self.test = None
 
         return None
     
@@ -139,7 +207,7 @@ class DataSet():
 
         return meta_dict
 
-    def generate_data(self, k_folds= 5, splitting='Stratified', test_set = 'True'):
+    def generate_data(self, test_set = 'True'):
         """
         Loops through each y column stored in y_dict (generated from sampleNoise()), generates 9
         binary splits on percentiles 10 through 90, splits each binary split into 10 Folds by Stratified
@@ -158,8 +226,6 @@ class DataSet():
         """
         # Set class variables from function inputs
         self.test_set = test_set
-        self.splitting = splitting
-        self.k_folds = k_folds
 
         # Set function variables from dataset class variables
         y_dict = self.y_dict
@@ -169,6 +235,7 @@ class DataSet():
         sample_size = self.sample_size
         num_features = self.num_features
         tups = self.tups
+        k_folds = self.k_folds
 
 
         for lvl_dict in y_dict.keys():
@@ -198,37 +265,26 @@ class DataSet():
                     meta['Sigma'] = sigma
                     meta['Estimator'] = estimator
 
-                    # meta = make_meta(dataset=dataset_name,
-                    #                 sample_size=sample_size,
-                    #                 thresh=thresh,
-                    #                 perc=perc,
-                    #                 algorithm=alg_name,
-                    #                 noise_level=noise_level,
-                    #                 sigma=sigma,
-                    #                 k_folds=k_folds,
-                    #                 splitting=splitting,
-                    #                 testset=testset,
-                    #                 estimator=estimator)
-
-                    # Make a k-fold split and get a classifier and regressor score for each split
-                    BA = get_clf_rgr_scores(meta=meta, thresh = thresh, k_folds = k_folds, X=X, y=y, y_true=y_true, clf=clf, rgr=rgr, splitting=splitting)
+                    # Check for if there was a train test split or not
+                    if self.training_sets:
+                        BA = []
+                        for i in range(self.training_sets['X_train']):
+                            X_train = self.training_sets['X_train'][i]
+                            y_train = self.training_sets['y_train'][i]
+                            X_test = self.testing_sets['X_test'][i]
+                            y_test = self.testing_sets['y_test'][i]
+                            BA.append(get_clf_rgr_scores_test_set(meta=meta, thresh=thresh, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, clf = clf, rgr = rgr))
+                    else:
+                        BA = get_clf_rgr_scores(meta=meta, thresh = thresh, k_folds = k_folds, X=X, y=y, y_true=y_true, clf=clf, rgr=rgr, splitting=splitting)
 
                     # Save PKL file
                     save_pkl(BA=BA, parent_path = self.parent_path)
 
-                    print('Dataset: {}\n Noise Level: {}\n Split: {}\n Variables: {}\n'.format(dataset_name,
-                                                                                            noise_level,
-                                                                                            perc,
-                                                                                            num_features))
+                    print(f'Dataset: {dataset_name}\n Noise Level: {noise_level}\n Split: {perc}\n Variables: {num_features}\n')
+
                     for key in BA[1].keys():
-                        print('{} Classifier {}: {} +/- {}'.format(meta['Algorithm'],
-                                                                key,
-                                                                np.average(BA[1][key][0]['Clfs']),
-                                                                np.std(BA[1][key][0]['Clfs'])))
-                        print('{} Regressor {}: {} +/- {}'.format(meta['Algorithm'],
-                                                                key,
-                                                                np.average(BA[1][key][1]['Rgrs']),
-                                                                np.std(BA[1][key][1]['Rgrs'])))
+                        print(f"{meta['Algorithm']} Classifier {key}: {np.average(BA[1][key][0]['Clfs'])} +/- {np.std(BA[1][key][0]['Clfs'])}")                                   
+                        print(f"{meta['Algorithm']} Regressor {key}: {np.average(BA[1][key][1]['Rgrs'])} +/- {np.std(BA[1][key][1]['Rgrs'])}")                                            
                     print('\n')
 
         return None
@@ -238,6 +294,10 @@ class DataSet():
 
         Uses StandardScaler() to scale X data of the dataset.
         """
+        # Give error if train test split already performed
+        if not isinstance(self.train, type(None)):
+            return print("Must scale X before train test split.")
+
         scaler = StandardScaler()
         scaled_X = scaler.fit_transform(self.X)
         scaled_df = pd.DataFrame(scaled_X, index = self.X.index, columns = self.X.columns)
@@ -251,6 +311,9 @@ class DataSet():
 
         Drops features with variance below a certain threshold
         """
+        # Give error if train test split already performed
+        if not isinstance(self.train, type(None)):
+            return print("Must drop low variance features before train test split")
 
         # Get variance and assign to dataframe where feature variables are rows
         variance = self.X.var()
@@ -274,6 +337,9 @@ class DataSet():
 
         Drops correlated feature variables above the supplied threshold.
         """
+        # Give error if train test split already performed
+        if not isinstance(self.train, type(None)):
+            return print("Must drop correlated features before train test split.")
 
         # Create correlation matrix
         corr_matrix = self.X.corr().abs()
@@ -360,14 +426,14 @@ class DataSet():
 
         return df_stats
     
-    def make_opt_algs(self, optimize_on = ['Continuous', 'Categorical']):
+    def make_opt_algs(self, X, y, optimize_on = ['Continuous', 'Categorical']):
         """
 
         Optimizes algorithms via GridSearchCV and returns a tuple of optimized clfs and rgrs.
 
         Inputs:
-        X (dataframe): Feature variables of a dataset.
-        y (Series): Target variable of a dataset.
+        optimize_set: Chooses set to optimize hyperparameters on. If set to self.train, will optimize on training set. If set
+                        to self.df, will optimize on entire dataset.
         optimize_on (String): 'Continuous' will optimize on continuous dataset, and 'Categorical' will optimize on categorical dataset.
         """
 
@@ -397,8 +463,8 @@ class DataSet():
             }
 
         svm_dict = {
-            'kernel': ['linear', 'sigmoid', 'rbf'],
-            'C': [1, 2, 5, 10]
+            'kernel': ['sigmoid', 'rbf'],
+            'C': [0.001, 0.01, 0.1, 1, 10]
             }
 
         rf_dict = {
@@ -416,9 +482,6 @@ class DataSet():
             svm_search = GridSearchCV(estimator = svr, param_grid = svm_dict, n_jobs = -1, verbose= 10)
             rf_search = GridSearchCV(estimator = rfr, param_grid = rf_dict, n_jobs = -1, verbose= 10)
             searches = [knn_search, dt_search, svm_search, rf_search]
-
-            # Set y to be continuous
-            y = self.y_true
 
             # Set dataset variable
             self.optimized_on_ = 'Continuous'
@@ -438,11 +501,11 @@ class DataSet():
             # Set y to be categorical
             # Vectorize binning function
             twobin_v = np.vectorize(two_binner)
-            thresh = np.median(self.y_true)
-            y = twobin_v(self.y_true, thresh = thresh)
+            thresh = np.median(y)
+            y = twobin_v(y, thresh = thresh)
 
             # Set dataset variable
-            self.optimized_on_ = 'Categorical: {}'.format(thresh)
+            self.optimized_on_ = f'Categorical: {thresh}'
 
         # Make names and zip into tuples
         gridnames = ['KNNOpt', 'DTOpt', 'SVMOpt', 'RFOpt']
@@ -451,7 +514,7 @@ class DataSet():
         for i,search in enumerate(searches):
             
             # Fit the gridsearch
-            search.fit(self.X, y)
+            search.fit(X, y)
             opt_params = search.best_params_
 
             # Set the parameters of the regressor
@@ -460,7 +523,7 @@ class DataSet():
 
             # Set the parameters of the classifier
             clf = clf_list[i]
-            rgr.set_params(**opt_params)
+            clf.set_params(**opt_params)
 
         # Reinstantiate as new tuple and add to list
         names = ['KNN', 'DT', 'SVM', 'RF']
@@ -759,6 +822,148 @@ def get_clf_rgr_scores(meta= None, thresh = None, k_folds = None, X= None, y= No
 
     return BA
 
+def get_clf_rgr_scores_test_set(meta= None, thresh = None, X_train, X_test, y_train, y_test, clf = None, rgr = None):
+    """
+    Takes a meta-dictionary, training and test set. Fits a classifier and gets a classifier score. Fits a regressor, predicts, converts predictions
+    to classes based on threshold, and gets score on those classes. All for a single algorithm (clf/rgr pair).
+
+    Parameters:
+        meta (dict): Python dictionary containing meta-information. (Default = 600).
+        train (Pandas dataframe): Training set.
+        test (Pandas dataframe): Test set.
+
+    Returns:
+         BA (list): List of meta dictionary, classifier score dictionary, and regressor score dictionary.
+    """
+
+    # Vectorize binning function
+    twobin_v = np.vectorize(two_binner)
+
+    # Define categorized variables
+    y_train_class = pd.DataFrame(twobin_v(y_train, thresh = thresh), index= y_train.index)
+    y_test_class = pd.DataFrame(twobin_v(y_test, thresh=thresh), index=y_test.index)
+
+    # Define empty lists and dictionaries
+    BA_clfs = []
+    dict_BA_clfs = {'Clfs': BA_clfs}
+    BA_rgrs = []
+    dict_BA_rgrs = {'Rgrs': BA_rgrs}
+
+    F1_clfs = []
+    dict_F1_clfs = {'Clfs': F1_clfs}
+    F1_rgrs = []
+    dict_F1_rgrs = {'Rgrs': F1_rgrs}
+
+    ROCAUC_clfs = []
+    dict_ROCAUC_clfs = {'Clfs': ROCAUC_clfs}
+    ROCAUC_rgrs = []
+    dict_ROCAUC_rgrs = {'Rgrs': ROCAUC_rgrs}
+
+    Brier_clfs = []
+    dict_Brier_clfs = {'Clfs': Brier_clfs}
+    Brier_rgrs = []
+    dict_Brier_rgrs = {'Rgrs': Brier_rgrs}
+
+    Kappa_clfs = []
+    dict_Kappa_clfs = {'Clfs': Kappa_clfs}
+    Kappa_rgrs = []
+    dict_Kappa_rgrs = {'Rgrs': Kappa_rgrs}
+
+    Logloss_clfs = []
+    dict_Logloss_clfs = {'Clfs': Logloss_clfs}
+    Logloss_rgrs = []
+    dict_Logloss_rgrs = {'Rgrs': Logloss_rgrs}
+
+    Pearsphi_clfs = []
+    dict_Pearsphi_clfs = {'Clfs': Pearsphi_clfs}
+    Pearsphi_rgrs = []
+    dict_Pearsphi_rgrs = {'Rgrs': Pearsphi_rgrs}
+
+    scores = {
+        'BA': [dict_BA_clfs, dict_BA_rgrs],
+        'F1': [dict_F1_clfs, dict_F1_rgrs],
+        'ROC-AUC': [dict_ROCAUC_clfs, dict_ROCAUC_rgrs],
+        'Brier': [dict_Brier_clfs, dict_Brier_rgrs],
+        'Kappa': [dict_Kappa_clfs, dict_Kappa_rgrs],
+        'Logloss': [dict_Logloss_clfs, dict_Logloss_rgrs],
+        'Pearsphi': [dict_Pearsphi_clfs, dict_Pearsphi_rgrs]
+        }
+
+    BA = [meta, scores]
+
+    # Fit Clf
+    clf.fit(X_train, y_train_class.values.ravel())
+
+    # Classifier probabilistic scores
+    y_prob_clf = clf.predict_proba(X_test)
+    roc_score_clf = roc_auc_score(y_test_class, y_prob_clf[:,1])
+    brier_score_clf = brier_score_loss(y_test_class, y_prob_clf[:,1])
+    logloss_score_clf = log_loss(y_test_class, y_prob_clf[:,1])
+
+    # Classifier append probabilistic scores
+    ROCAUC_clfs.append(roc_score_clf)
+    Brier_clfs.append(brier_score_clf)
+    Logloss_clfs.append(logloss_score_clf)
+
+    # Classifier regular scores
+    y_pred_clf = clf.predict(X_test)
+    BA_score_clf = balanced_accuracy_score(y_test_class, y_pred_clf)
+    F1_score_clf = f1_score(y_test_class, y_pred_clf)
+    kappa_score_clf = cohen_kappa_score(y_test_class, y_pred_clf)
+    pearsphi_score_clf = matthews_corrcoef(y_test_class, y_pred_clf)
+
+    # Classifier append regular scores
+    BA_clfs.append(BA_score_clf)
+    F1_clfs.append(F1_score_clf)
+    Kappa_clfs.append(kappa_score_clf)
+    Pearsphi_clfs.append(pearsphi_score_clf)
+
+    # Fit and predict with rgr and get score
+    log = LogisticRegression(max_iter= 1000, solver = 'liblinear')
+    rgr.fit(X_train, y_train.ravel())
+    y_pred_rgr = rgr.predict(X_test)
+    y_pred_rgr_class = twobin_v(y_pred_rgr, thresh=thresh)
+
+    # Try except block to handle ValueError for having only a single class in a test set
+    logregerror = False
+    try:
+        log.fit(X_test, y_pred_rgr_class)
+        y_prob_rgr = log.predict_proba(X_test)
+    except ValueError:
+        print('One class in Logistic Regressions Test set')
+        logregerror = True
+        pass
+
+    # Add if clause for if Logistic Regression passed
+    if logregerror:
+        roc_score_rgr = np.nan
+        brier_score_rgr = np.nan
+        logloss_score_rgr = np.nan
+    else:
+        # Get rgr probabilistic scores
+        roc_score_rgr = roc_auc_score(y_test_class, y_prob_rgr[:,1])
+        brier_score_rgr = brier_score_loss(y_test_class, y_prob_rgr[:, 1])
+        logloss_score_rgr = log_loss(y_test_class, y_prob_rgr[:, 1])
+
+    # Append rgr probabilistic scores
+    ROCAUC_rgrs.append(roc_score_rgr)
+    Brier_rgrs.append(brier_score_rgr)
+    Logloss_rgrs.append(logloss_score_rgr)
+
+    # Get rgr regular scores
+    BA_score_rgr = balanced_accuracy_score(y_test_class, y_pred_rgr_class)
+    F1_score_rgr = f1_score(y_test_class, y_pred_rgr_class)
+    kappa_score_rgr = cohen_kappa_score(y_test_class, y_pred_rgr_class)
+    pearsphi_score_rgr = matthews_corrcoef(y_test_class, y_pred_rgr_class)
+
+    # Append rgr regular scores
+    BA_rgrs.append(BA_score_rgr)
+    F1_rgrs.append(F1_score_rgr)
+    Kappa_rgrs.append(kappa_score_rgr)
+    Pearsphi_rgrs.append(pearsphi_score_rgr)
+
+    return BA
+
 def save_pkl(BA=None, parent_path = None):
     """
     Takes a list BA which contains a meta-dictionary and algorithm metrics,
@@ -807,15 +1012,8 @@ def save_pkl(BA=None, parent_path = None):
 
     # Save PKL file
     uniq_tag = str(datetime.datetime.now().date()) + '_' + str(datetime.datetime.now().time()).replace(':', '.')
-    pklfilename = '{}_{}_{}_{}_{}_{}_{}_{}_{}.pkl'.format(dataset,
-                                                    testset,
-                                                    splitting,
-                                                    sample_size,
-                                                    noise_level,
-                                                    perc,
-                                                    kfolds,
-                                                    name,
-                                                    uniq_tag)
+    pklfilename = f'{dataset}_{testset}_{splitting}_{sample_size}_{noise_level}_{perc}_{kfolds}_{name}_{uniq_tag}.pkl'
+                                                    
     pklfile = os.path.join(foldpath, pklfilename)
     with open(pklfile, 'wb') as f:
         pickle.dump(BA, f)
