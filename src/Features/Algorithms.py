@@ -62,7 +62,7 @@ def make_algs(param_dicts = None):
 
     return tups
 
-def make_opt_algs(X, y):
+def make_opt_algs(X, y, optimize_on = ['Continuous', 'Categorical']):
     """
 
     Optimizes algorithms via GridSearchCV and returns a tuple of optimized clfs and rgrs.
@@ -70,6 +70,7 @@ def make_opt_algs(X, y):
     Inputs:
     X (dataframe): Feature variables of a dataset.
     y (Series): Target variable of a dataset.
+    optimize_on (String): 'Continuous' will optimize on continuous dataset, and 'Categorical' will optimize on categorical dataset.
     """
 
     # Instantiate Classifiers
@@ -109,30 +110,39 @@ def make_opt_algs(X, y):
         'min_samples_leaf': [1, 5, 10, 20]
         }
 
-    # Make rgr GridSearch
-    knn_search = GridSearchCV(estimator = knnr, param_grid = knn_dict, n_jobs = -1, verbose= 10)
-    dt_search = GridSearchCV(estimator = dtr, param_grid = dt_dict, n_jobs = -1, verbose= 10)
-    svm_search = GridSearchCV(estimator = svr, param_grid = svm_dict, n_jobs = -1, verbose= 10)
-    rf_search = GridSearchCV(estimator = rfr, param_grid = rf_dict, n_jobs = -1, verbose= 10)
-    rgr_searches = [knn_search, dt_search, svm_search, rf_search]
+    if optimize_on == 'Continous':
+        # Make rgr GridSearch
+        knn_search = GridSearchCV(estimator = knnr, param_grid = knn_dict, n_jobs = -1, verbose= 10)
+        dt_search = GridSearchCV(estimator = dtr, param_grid = dt_dict, n_jobs = -1, verbose= 10)
+        svm_search = GridSearchCV(estimator = svr, param_grid = svm_dict, n_jobs = -1, verbose= 10)
+        rf_search = GridSearchCV(estimator = rfr, param_grid = rf_dict, n_jobs = -1, verbose= 10)
+        searches = [knn_search, dt_search, svm_search, rf_search]
+
+    elif optimize_on == 'Categorical':
+        # Make clf GridSearch
+        knn_search = GridSearchCV(estimator = knn, param_grid = knn_dict, n_jobs = -1, verbose= 10)
+        dt_search = GridSearchCV(estimator = dt, param_grid = dt_dict, n_jobs = -1, verbose= 10)
+        svm_search = GridSearchCV(estimator = svc, param_grid = svm_dict, n_jobs = -1, verbose= 10)
+        rf_search = GridSearchCV(estimator = rf, param_grid = rf_dict, n_jobs = -1, verbose= 10)
+        searches = [knn_search, dt_search, svm_search, rf_search]
 
     # Make names and zip into tuples
     gridnames = ['KNNOpt', 'DTOpt', 'SVMOpt', 'RFOpt']
 
     # Fit searches
-    for i,search in enumerate(rgr_searches):
+    for i,search in enumerate(searches):
         
         # Fit the gridsearch
         search.fit(X, y)
-        rgr_opt_params = search.best_params_
+        opt_params = search.best_params_
 
         # Set the parameters of the regressor
         rgr = rgr_list[i]
-        rgr.set_params(**rgr_opt_params)
+        rgr.set_params(**opt_params)
 
         # Set the parameters of the classifier
         clf = clf_list[i]
-        clf.set_params(**rgr_opt_params)
+        rgr.set_params(**opt_params)
 
     # Reinstantiate as new tuple and add to list
     names = ['KNN', 'DT', 'SVM', 'RF']
