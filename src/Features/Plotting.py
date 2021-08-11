@@ -31,6 +31,7 @@ class scoreSheet():
         # Remove key-value pairs from meta dict that cause problems for Pandas
         del meta['features']
         del meta['Estimator']
+        del meta['tups']
 
         # Iterate through each score
         for key in scores.keys():
