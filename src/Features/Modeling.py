@@ -6,6 +6,8 @@ import os
 from itertools import compress
 import random
 import datetime
+import paramiko
+from dotenv import load_dotenv
 
 # Import sklearn
 from scipy.stats.stats import pearsonr, spearmanr, ttest_ind
@@ -99,6 +101,8 @@ class DataSet():
         # Set empty splitting and train test split variables
         self.k_folds = None
         self.splitting = None
+        self.training_sets = None
+        self.testing_sets = None
         self.train = None
         self.test = None
 
@@ -122,6 +126,10 @@ class DataSet():
         the respective training and test sets within each fold.
 
         """
+
+        # Set class variables
+        self.k_folds = n_folds
+        self.splitting = split_method
 
         # Add Clause for KFold versus StratifiedKFold
         if split_method == 'Stratified':
@@ -291,29 +299,19 @@ class DataSet():
                             # Get score for single fold
                             score_dict = get_clf_rgr_scores_test_set(thresh=thresh, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, clf = clf, rgr = rgr)
                             score_dict_list.append(score_dict)
-                            
-                            # Save single score
-                            save_pkl(score_dict = score_dict, meta = meta, parent_path = self.parent_path)
+                        
+                        # Accumulate scores
+                        accumulated_scores = accumulate_scores(score_dict_list)
+
+                        # Save accumulated score dictionary
+                        save_pkl_ssh(score_dict = accumulated_scores, meta = meta, pkl_path = self.parent_path)
 
                         # Print statements
                         print(f'Dataset: {dataset_name}\n Noise Level: {noise_level}\n Split: {perc}\n Variables: {num_features}\n')
-                        
-                        # Create empty dictionary for score reporting
-                        accumulated_scores = {}
-                        for key in score_dict_list[0].keys():
-                            accumulated_scores[key] = {'Clfs': [], 'Rgrs': []}
-
-                        # Accumulate the scores from the individual score dictionaries
-                        for score_dict in score_dict_list:
-                            for key in score_dict.keys():
-                                clf_score = score_dict[key][0]['Clfs']
-                                accumulated_scores[key]['Clfs'].append(clf_score)
-                                rgr_score = score_dict[key][1]['Rgrs']
-                                accumulated_scores[key]['Rgrs'].append(rgr_score)
-
+                        for key in accumulated_scores.keys():
                             print(f"{meta['Algorithm']} Classifier {key}: {np.average(accumulated_scores[key]['Clfs'])} +/- {np.std(accumulated_scores[key]['Clfs'])}")                                   
                             print(f"{meta['Algorithm']} Regressor {key}: {np.average(accumulated_scores[key]['Rgrs'])} +/- {np.std(accumulated_scores[key]['Rgrs'])}")                                            
-                        print('\n')
+                            print('\n')
 
                     # Original k-fold method
                     else:
@@ -330,7 +328,9 @@ class DataSet():
                         print('\n')
 
         return None
-
+#---------------------
+# PREPROCESSING
+#---------------------
     def scale_x(self):
         """
 
@@ -467,6 +467,34 @@ class DataSet():
             index = self.X.columns)
 
         return df_stats
+#-------------------------
+# ALGORITHM STEPS
+#-------------------------
+    def make_algs(self):
+        """
+        Sets non optimized algorithm tuples to class variable self.tups.
+        """
+        # Instantiate Classifiers
+        knn = KNeighborsClassifier(weights='distance')
+        dt = DecisionTreeClassifier(max_features= 'auto', criterion= 'gini')
+        svc = SVC(probability=True)
+        rf = RandomForestClassifier(criterion= 'gini')
+        clf_list = [knn, dt, svc, rf]
+
+        # Instantiate Regressors
+        knnr = KNeighborsRegressor(weights='distance')
+        dtr = DecisionTreeRegressor(max_features= 'auto', criterion= 'mse')
+        svr = SVR()
+        rfr = RandomForestRegressor(criterion= 'mse')
+        rgr_list = [knnr, dtr, svr, rfr]
+
+        # Reinstantiate as new tuple and add to list
+        names = ['KNN', 'DT', 'SVM', 'RF']
+        tups = list(zip(clf_list, rgr_list, names))
+
+        self.tups = tups
+
+        return None
     
     def make_opt_algs(self, X, y, optimize_on = ['Continuous', 'Categorical']):
         """
@@ -474,8 +502,6 @@ class DataSet():
         Optimizes algorithms via GridSearchCV and returns a tuple of optimized clfs and rgrs.
 
         Inputs:
-        optimize_set: Chooses set to optimize hyperparameters on. If set to self.train, will optimize on training set. If set
-                        to self.df, will optimize on entire dataset.
         optimize_on (String): 'Continuous' will optimize on continuous dataset, and 'Categorical' will optimize on categorical dataset.
         """
 
@@ -577,8 +603,9 @@ class DataSet():
 
         return None
 
-##################################################
+#----------------------------
 # NON CLASS METHODS
+#----------------------------
 def random_x(df, num):
     """
     Selects a random X variable.
@@ -889,38 +916,6 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, r
     y_train_class = pd.DataFrame(twobin_v(y_train, thresh = thresh), index= y_train.index)
     y_test_class = pd.DataFrame(twobin_v(y_test, thresh=thresh), index=y_test.index)
 
-    # Define empty lists and dictionaries
-    BA_clfs = []
-    BA_rgrs = []
-
-    F1_clfs = []
-    F1_rgrs = []
-
-    ROCAUC_clfs = []
-    ROCAUC_rgrs = []
-
-    Brier_clfs = []
-    Brier_rgrs = []
-
-    Kappa_clfs = []
-    Kappa_rgrs = []
-
-    Logloss_clfs = []
-    Logloss_rgrs = []
-
-    Pearsphi_clfs = []
-    Pearsphi_rgrs = []
-
-    score_dict = {
-        'BA': {'Clfs': BA_clfs, 'Rgrs': BA_rgrs},
-        'F1': {'Clfs': F1_clfs, 'Rgrs': F1_rgrs},
-        'ROC-AUC': {'Clfs': ROCAUC_clfs, 'Rgrs': ROCAUC_rgrs},
-        'Brier': {'Clfs': Brier_clfs, 'Rgrs': Brier_rgrs},
-        'Kappa': {'Clfs': Kappa_clfs, 'Rgrs': Kappa_rgrs},
-        'Logloss': {'Clfs': Logloss_clfs, 'Rgrs': Logloss_rgrs},
-        'Pearsphi': {'Clfs': Pearsphi_clfs, 'Rgrs': Pearsphi_rgrs}
-        }
-
     # Fit Clf
     clf.fit(X_train, y_train_class.values.ravel())
 
@@ -930,23 +925,12 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, r
     brier_score_clf = brier_score_loss(y_test_class, y_prob_clf[:,1])
     logloss_score_clf = log_loss(y_test_class, y_prob_clf[:,1])
 
-    # Classifier append probabilistic scores
-    ROCAUC_clfs.append(roc_score_clf)
-    Brier_clfs.append(brier_score_clf)
-    Logloss_clfs.append(logloss_score_clf)
-
     # Classifier regular scores
     y_pred_clf = clf.predict(X_test)
     BA_score_clf = balanced_accuracy_score(y_test_class, y_pred_clf)
     F1_score_clf = f1_score(y_test_class, y_pred_clf)
     kappa_score_clf = cohen_kappa_score(y_test_class, y_pred_clf)
     pearsphi_score_clf = matthews_corrcoef(y_test_class, y_pred_clf)
-
-    # Classifier append regular scores
-    BA_clfs.append(BA_score_clf)
-    F1_clfs.append(F1_score_clf)
-    Kappa_clfs.append(kappa_score_clf)
-    Pearsphi_clfs.append(pearsphi_score_clf)
 
     # Fit and predict with rgr and get score
     log = LogisticRegression(max_iter= 1000, solver = 'liblinear')
@@ -975,24 +959,44 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, r
         brier_score_rgr = brier_score_loss(y_test_class, y_prob_rgr[:, 1])
         logloss_score_rgr = log_loss(y_test_class, y_prob_rgr[:, 1])
 
-    # Append rgr probabilistic scores
-    ROCAUC_rgrs.append(roc_score_rgr)
-    Brier_rgrs.append(brier_score_rgr)
-    Logloss_rgrs.append(logloss_score_rgr)
-
     # Get rgr regular scores
     BA_score_rgr = balanced_accuracy_score(y_test_class, y_pred_rgr_class)
     F1_score_rgr = f1_score(y_test_class, y_pred_rgr_class)
     kappa_score_rgr = cohen_kappa_score(y_test_class, y_pred_rgr_class)
     pearsphi_score_rgr = matthews_corrcoef(y_test_class, y_pred_rgr_class)
 
-    # Append rgr regular scores
-    BA_rgrs.append(BA_score_rgr)
-    F1_rgrs.append(F1_score_rgr)
-    Kappa_rgrs.append(kappa_score_rgr)
-    Pearsphi_rgrs.append(pearsphi_score_rgr)
+    score_dict = {
+    'BA': {'Clfs': BA_score_clf, 'Rgrs': BA_score_rgr},
+    'F1': {'Clfs': F1_score_clf, 'Rgrs': F1_score_rgr},
+    'ROC-AUC': {'Clfs': roc_score_clf, 'Rgrs': roc_score_rgr},
+    'Brier': {'Clfs': brier_score_clf, 'Rgrs': brier_score_rgr},
+    'Kappa': {'Clfs': kappa_score_clf, 'Rgrs': kappa_score_rgr},
+    'Logloss': {'Clfs': logloss_score_clf, 'Rgrs': logloss_score_rgr},
+    'Pearsphi': {'Clfs': pearsphi_score_clf, 'Rgrs': pearsphi_score_rgr}
+    }
 
     return score_dict
+
+def accumulate_scores(score_dict_list):
+    """
+    Takes individual scores from different folds and accumulates into an accumulated score dictionary.
+    """
+
+    # Extract individual scores from score list and refactor for a save-able version
+    # Create empty dictionary for score reporting
+    accumulated_scores = {}
+    for key in score_dict_list[0].keys():
+        accumulated_scores[key] = {'Clfs': [], 'Rgrs': []}
+
+    # Accumulate the scores from the individual score dictionaries
+    for score_dict in score_dict_list:
+        for key in score_dict.keys():
+            clf_score = score_dict[key]['Clfs']
+            accumulated_scores[key]['Clfs'].append(clf_score)
+            rgr_score = score_dict[key]['Rgrs']
+            accumulated_scores[key]['Rgrs'].append(rgr_score)
+
+    return accumulated_scores
 
 def save_pkl(score_dict = None, meta = None, parent_path = None):
     """
@@ -1033,18 +1037,63 @@ def save_pkl(score_dict = None, meta = None, parent_path = None):
     elif parent_path:
         foldpath = os.path.join(r'C:\Users\skolmar\PycharmProjects\Dichotomization\PKL', parent_path)
 
-
-
     # Check if directory path exists and make directory
     if not os.path.exists(foldpath):
         os.makedirs(foldpath)
 
     # Save PKL file
     uniq_tag = str(datetime.datetime.now().date()) + '_' + str(datetime.datetime.now().time()).replace(':', '.')
-    pklfilename = f'{dataset}_{testset}_{splitting}_{sample_size}_{noise_level}_{perc}_{kfolds}_{name}_{uniq_tag}.pkl'
-                                                    
+    pklfilename = f'{dataset}_{testset}_{splitting}_{sample_size}_{noise_level}_{perc}_{kfolds}_{name}_{uniq_tag}.pkl'                            
     pklfile = os.path.join(foldpath, pklfilename)
     with open(pklfile, 'wb') as f:
         pickle.dump(pkl_data, f)
 
-    return
+    return None
+
+def save_pkl_ssh(score_dict = None, meta = None, pkl_path = None):
+    """ Save PKL data on a remote server. """
+
+    # Define server variables
+    host = "cu.epa.gov"
+    port = 22
+    username = os.environ.get('USER')
+    password = os.environ.get('PASSWORD')
+    
+    # Define meta variables
+    dataset = meta['name']
+    testset = meta['test_set']
+    splitting = meta['splitting']
+    sample_size = meta['sample_size']
+    noise_level = meta['Noise Level']
+    perc = meta['Percentile']
+    kfolds = meta['k_folds']
+    name = meta['Algorithm']
+
+    # Define object to be saved to PKL
+    pkl_data = [meta, score_dict]
+
+    # Check if directory path exists and make directory
+    if not os.path.exists(pkl_path):
+        os.makedirs(pkl_path)
+
+    # Prepare PKL file name
+    uniq_tag = str(datetime.datetime.now().date()) + '_' + str(datetime.datetime.now().time()).replace(':', '.')
+    pklfilename = f'{dataset}_{testset}_{splitting}_{sample_size}_{noise_level}_{perc}_{kfolds}_{name}_{uniq_tag}.pkl'                            
+    pklfile = os.path.join(pkl_path, pklfilename)
+
+    # Open SSH client
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(host, port, username, password)
+    ftp_client = ssh.open_sftp()
+
+    # Save PKL on server
+    file = ftp_client.file(pklfile, 'w')
+    pickle.dump(pkl_data, file)
+    file.flush()
+
+    # Close connections
+    ftp_client.close()
+    ssh.close()
+
+    return None
