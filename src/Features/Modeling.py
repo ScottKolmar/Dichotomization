@@ -103,8 +103,6 @@ class DataSet():
         self.splitting = None
         self.training_sets = None
         self.testing_sets = None
-        self.train = None
-        self.test = None
 
         # Tups variable is a list, each member corresponds to a set of algorithms optimized
         # on the respective training set, in the same order
@@ -169,32 +167,17 @@ class DataSet():
             return print("Cannot use train test split and kfold splitting simultaneously.")
 
         # split dataset into train and test sets
-        self.train = self.df.sample(frac=percentage)
-        self.test = self.df.loc[~self.df.index.isin(self.train.index)]
+        training_df = self.df.sample(frac=percentage)
+        test_df = self.df.loc[~self.df.index.isin(training_df.index)]
+        self.training_sets['X_train'].append(training_df.iloc[:, :-1])
+        self.training_sets['y_train'].append(training_df.iloc[:, -1])
+        self.testing_sets['X_test'].append(test_df.iloc[:,:-1])
+        self.testing_sets['y_test'].append(test_df.iloc[:,-1])
 
         # Set other conflicting variables
         self.k_folds = None
         self.splitting = None
     
-        return None
-    
-    # DEPRECATED
-    def set_k_fold_params(self, k_folds, splitting):
-        """
-        Sets k_fold and splitting class variables.
-        """
-        # Raise error if training and test set chosen
-        if not self.train.empty or self.test.empty:
-            return print("Cannot use kfold splitting and train test split simultaneously.")
-
-        # Set class variables according to function inputs
-        self.k_folds = k_folds
-        self.splitting = splitting
-
-        # Set conflicting variables
-        self.train = None
-        self.test = None
-
         return None
     
     # DEPRECATED
@@ -229,10 +212,22 @@ class DataSet():
         for key in vars(self):
             if key not in ['csv', 'df', 'X', 'y_true', 'y_dict']:
                 meta_dict[key] = vars(self)[key]
+        
+        # Set the training sets to only be indices to save space
+        meta_dict['training_sets']['X_train'] = [x.index for x in meta_dict['training_sets']['X_train']]
+        meta_dict['testing_sets']['X_test'] = [x.index for x in meta_dict['testing_sets']['X_test']]
+
+        # Convert each estimator within self.tups into a dictionary of parameters to save space
+        new_meta = {}
+        new_meta['tups'] = []
+        for tup in meta_dict['tups']:
+            tup_params = [[x[0].get_params(deep=True), x[1].get_params(deep=True), x[2]] for x in tup]
+            new_meta['tups'].append(tup_params)
+        meta_dict['tups'] = new_meta['tups']
 
         return meta_dict
 
-    def generate_data(self, tups, test_set = 'True'):
+    def generate_data(self, tups, test_set = 'True', use_ssh = False):
         """
         Loops through each y column stored in y_dict (generated from sampleNoise()), generates 9
         binary splits on percentiles 10 through 90, and trains a classifier/regressor pair on each fold. Takes the average BA score for each fold
@@ -242,6 +237,7 @@ class DataSet():
         Parameters:
             tups (list of tuples): List of tuples containing classifier, regressor, name for several algorithms.
             test_set (str): Can be 'True' or 'Noise'. Determines whether the test set for modeling will have noise or not. (Default = 'True')
+            use_ssh (bool): If True the files will be saved over SSH, if false they will be saved locally. (Default = False)
         Returns:
 
         """
@@ -285,46 +281,34 @@ class DataSet():
                     meta['Sigma'] = sigma
                     meta['Estimator'] = estimator
 
-                    # Check if training sets are used
-                    if self.training_sets:
-                        score_dict_list = []
+                    # Create the list of score dictionaries
+                    score_dict_list = []
 
-                        # Loop through each fold
-                        for i, set in enumerate(self.training_sets['X_train']):
-                            X_train = self.training_sets['X_train'][i]
-                            y_train = self.training_sets['y_train'][i]
-                            X_test = self.testing_sets['X_test'][i]
-                            y_test = self.testing_sets['y_test'][i]
+                    # Loop through each training set
+                    for i, training_set in enumerate(self.training_sets['X_train']):
+                        X_train = self.training_sets['X_train'][i]
+                        y_train = self.training_sets['y_train'][i]
+                        X_test = self.testing_sets['X_test'][i]
+                        y_test = self.testing_sets['y_test'][i]
 
-                            # Get score for single fold
-                            score_dict = get_clf_rgr_scores_test_set(thresh=thresh, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, clf = clf, rgr = rgr)
-                            score_dict_list.append(score_dict)
-                        
-                        # Accumulate scores
-                        accumulated_scores = accumulate_scores(score_dict_list)
+                        # Get score for single fold
+                        score_dict = get_clf_rgr_scores_test_set(thresh=thresh, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, clf = clf, rgr = rgr)
+                        score_dict_list.append(score_dict)
+                    
+                    # Accumulate scores
+                    accumulated_scores = accumulate_scores(score_dict_list)
 
-                        # Save accumulated score dictionary
+                    # Save accumulated score dictionary
+                    if use_ssh:
                         save_pkl_ssh(score_dict = accumulated_scores, meta = meta, pkl_path = self.parent_path)
-
-                        # Print statements
-                        print(f'Dataset: {dataset_name}\n Noise Level: {noise_level}\n Split: {perc}\n Variables: {num_features}\n')
-                        for key in accumulated_scores.keys():
-                            print(f"{meta['Algorithm']} Classifier {key}: {np.average(accumulated_scores[key]['Clfs'])} +/- {np.std(accumulated_scores[key]['Clfs'])}")                                   
-                            print(f"{meta['Algorithm']} Regressor {key}: {np.average(accumulated_scores[key]['Rgrs'])} +/- {np.std(accumulated_scores[key]['Rgrs'])}")                                            
-                            print('\n')
-
-                    # Original k-fold method
                     else:
-                        BA = get_clf_rgr_scores(meta=meta, thresh = thresh, k_folds = k_folds, X=X, y=y, y_true=y_true, clf=clf, rgr=rgr)
+                        save_pkl(score_dict = accumulated_scores, meta = meta, pkl_path = self.parent_path)
 
-                        # Save PKL file
-                        save_pkl(BA=BA, parent_path = self.parent_path)
-
-                        # Print statements
-                        print(f'Dataset: {dataset_name}\n Noise Level: {noise_level}\n Split: {perc}\n Variables: {num_features}\n')
-                        for key in score_dict[1].keys():
-                            print(f"{meta['Algorithm']} Classifier {key}: {np.average(BA[1][key][0]['Clfs'])} +/- {np.std(BA[1][key][0]['Clfs'])}")                                   
-                            print(f"{meta['Algorithm']} Regressor {key}: {np.average(BA[1][key][1]['Rgrs'])} +/- {np.std(BA[1][key][1]['Rgrs'])}")                                            
+                    # Print statements
+                    print(f'Dataset: {dataset_name}\n Noise Level: {noise_level}\n Split: {perc}\n Variables: {num_features}\n')
+                    for key in accumulated_scores.keys():
+                        print(f"{meta['Algorithm']} Classifier {key}: {np.average(accumulated_scores[key]['Clfs'])} +/- {np.std(accumulated_scores[key]['Clfs'])}")                                   
+                        print(f"{meta['Algorithm']} Regressor {key}: {np.average(accumulated_scores[key]['Rgrs'])} +/- {np.std(accumulated_scores[key]['Rgrs'])}")                                            
                         print('\n')
 
         return None
@@ -536,7 +520,7 @@ class DataSet():
             }
 
         rf_dict = {
-            'n_estimators': [25, 50, 100, 200, 300, 500],
+            'n_estimators': [10, 25, 50, 100, 150, 200],
             'max_depth': [50, 100, 200, 500],
             'min_samples_split': [2, 5, 10, 20, 40],
             'min_samples_leaf': [1, 5, 10, 20]
@@ -696,205 +680,6 @@ def sample_noise(y = None, base_sigma = None, num_levels = 10, scaling_factor = 
 
     return end_dict
 
-def make_meta(dataset = None, testset = None, splitting = None, noise_level = None, sigma = None, sample_size = None,
-             perc = None, thresh = None, k_folds = None, algorithm = None, estimator = None):
-    """
-    Makes a meta information dictionary for the PKL file.
-
-    Parameters:
-        dataset:
-        noise_level:
-        sigma:
-        sample_size:
-        perc:
-        thresh:
-        k_folds:
-        name:
-        splitting:
-
-    Returns:
-        meta (dict): Dictionary with parameters as values.
-    """
-    meta = {'Dataset': dataset,
-            'Test Set': testset,
-            'Splitting': splitting,
-            'Noise Level': noise_level,
-            'Sigma': sigma,
-            'Sample Size': sample_size,
-            'Percentile': perc,
-            'Threshold': thresh,
-            'K Folds': k_folds,
-            'Algorithm': algorithm,
-            'Estimator': estimator
-            }
-
-    return meta
-
-# DEPRECATED
-def get_clf_rgr_scores(meta= None, thresh = None, k_folds = None, X= None, y= None, y_true = None, clf = None, rgr = None,
-                    splitting = 'Stratified'):
-    """
-    Takes a meta-dictionary, X, and y, and converts y to classes based on a threshold. Performs Stratified K-Fold
-    splitting, fits a classifier and gets a classifier score. Fits a regressor, predicts, converts predictions
-    to classes based on threshold, and gets score on those classes. All for a single algorithm (clf/rgr pair).
-
-    Parameters:
-        meta (dict): Python dictionary containing meta-information. (Default = 600).
-        X (Pandas df slice): Featureset of a descriptor Pandas dataframe. (Default = 600).
-        y (Pandas df slice): Continuous y variable of a Pandas dataframe, with added error. (Default = 600).
-        y_true (Pandas series): Continuous y variable of true values (no error added). (Default = 600).
-        splitting (str): 'Stratified' gives StratifiedKFold splitting, and 'Normal' gives KFold splitting.
-                        (Default = 'Stratified')
-
-    Returns:
-         BA (list): List of meta dictionary, classifier score dictionary, and regressor score dictionary.
-    """
-
-    # Vectorize binning function
-    twobin_v = np.vectorize(two_binner)
-
-    # Define y_class
-    y_class = pd.DataFrame(twobin_v(y, thresh=thresh), index= y.index)
-    y_true_class = pd.DataFrame(twobin_v(y_true, thresh = thresh), index= y_true.index)
-
-    # Add Clause for KFold versus StratifiedKFold
-    if splitting == 'Stratified':
-        skf = StratifiedKFold(n_splits=k_folds)
-        skf.get_n_splits(X, y_class)
-    elif splitting == 'Normal':
-        skf = KFold(n_splits= k_folds)
-        skf.get_n_splits(X, y_class)
-
-    # Define empty lists and dictionaries
-    BA_clfs = []
-    dict_BA_clfs = {'Clfs': BA_clfs}
-    BA_rgrs = []
-    dict_BA_rgrs = {'Rgrs': BA_rgrs}
-
-    F1_clfs = []
-    dict_F1_clfs = {'Clfs': F1_clfs}
-    F1_rgrs = []
-    dict_F1_rgrs = {'Rgrs': F1_rgrs}
-
-    ROCAUC_clfs = []
-    dict_ROCAUC_clfs = {'Clfs': ROCAUC_clfs}
-    ROCAUC_rgrs = []
-    dict_ROCAUC_rgrs = {'Rgrs': ROCAUC_rgrs}
-
-    Brier_clfs = []
-    dict_Brier_clfs = {'Clfs': Brier_clfs}
-    Brier_rgrs = []
-    dict_Brier_rgrs = {'Rgrs': Brier_rgrs}
-
-    Kappa_clfs = []
-    dict_Kappa_clfs = {'Clfs': Kappa_clfs}
-    Kappa_rgrs = []
-    dict_Kappa_rgrs = {'Rgrs': Kappa_rgrs}
-
-    Logloss_clfs = []
-    dict_Logloss_clfs = {'Clfs': Logloss_clfs}
-    Logloss_rgrs = []
-    dict_Logloss_rgrs = {'Rgrs': Logloss_rgrs}
-
-    Pearsphi_clfs = []
-    dict_Pearsphi_clfs = {'Clfs': Pearsphi_clfs}
-    Pearsphi_rgrs = []
-    dict_Pearsphi_rgrs = {'Rgrs': Pearsphi_rgrs}
-
-    scores = {
-        'BA': [dict_BA_clfs, dict_BA_rgrs],
-        'F1': [dict_F1_clfs, dict_F1_rgrs],
-        'ROC-AUC': [dict_ROCAUC_clfs, dict_ROCAUC_rgrs],
-        'Brier': [dict_Brier_clfs, dict_Brier_rgrs],
-        'Kappa': [dict_Kappa_clfs, dict_Kappa_rgrs],
-        'Logloss': [dict_Logloss_clfs, dict_Logloss_rgrs],
-        'Pearsphi': [dict_Pearsphi_clfs, dict_Pearsphi_rgrs]
-        }
-
-    BA = [meta, scores]
-
-    # Loop through splits
-    for train_index, test_index in skf.split(X, y_class):
-        # Get training and test sets from indices
-        X_train = X.iloc[train_index, :]
-        y_train = y.iloc[train_index]
-        y_train_class = y_class.iloc[train_index]
-        X_test = X.iloc[test_index, :]
-        y_test_class = y_true_class.iloc[test_index]
-
-        # Fit Clf
-        clf.fit(X_train, y_train_class.values.ravel())
-
-        # Classifier probabilistic scores
-        y_prob_clf = clf.predict_proba(X_test)
-        roc_score_clf = roc_auc_score(y_test_class, y_prob_clf[:,1])
-        brier_score_clf = brier_score_loss(y_test_class, y_prob_clf[:,1])
-        logloss_score_clf = log_loss(y_test_class, y_prob_clf[:,1])
-
-        # Classifier append probabilistic scores
-        ROCAUC_clfs.append(roc_score_clf)
-        Brier_clfs.append(brier_score_clf)
-        Logloss_clfs.append(logloss_score_clf)
-
-        # Classifier regular scores
-        y_pred_clf = clf.predict(X_test)
-        BA_score_clf = balanced_accuracy_score(y_test_class, y_pred_clf)
-        F1_score_clf = f1_score(y_test_class, y_pred_clf)
-        kappa_score_clf = cohen_kappa_score(y_test_class, y_pred_clf)
-        pearsphi_score_clf = matthews_corrcoef(y_test_class, y_pred_clf)
-
-        # Classifier append regular scores
-        BA_clfs.append(BA_score_clf)
-        F1_clfs.append(F1_score_clf)
-        Kappa_clfs.append(kappa_score_clf)
-        Pearsphi_clfs.append(pearsphi_score_clf)
-
-        # Fit and predict with rgr and get score
-        log = LogisticRegression(max_iter= 1000, solver = 'liblinear')
-        rgr.fit(X_train, y_train.ravel())
-        y_pred_rgr = rgr.predict(X_test)
-        y_pred_rgr_class = twobin_v(y_pred_rgr, thresh=thresh)
-
-        # Try except block to handle ValueError for having only a single class in a test set
-        logregerror = False
-        try:
-            log.fit(X_test, y_pred_rgr_class)
-            y_prob_rgr = log.predict_proba(X_test)
-        except ValueError:
-            print('One class in Logistic Regressions Test set')
-            logregerror = True
-            pass
-
-        # Add if clause for if Logistic Regression passed
-        if logregerror:
-            roc_score_rgr = np.nan
-            brier_score_rgr = np.nan
-            logloss_score_rgr = np.nan
-        else:
-            # Get rgr probabilistic scores
-            roc_score_rgr = roc_auc_score(y_test_class, y_prob_rgr[:,1])
-            brier_score_rgr = brier_score_loss(y_test_class, y_prob_rgr[:, 1])
-            logloss_score_rgr = log_loss(y_test_class, y_prob_rgr[:, 1])
-
-        # Append rgr probabilistic scores
-        ROCAUC_rgrs.append(roc_score_rgr)
-        Brier_rgrs.append(brier_score_rgr)
-        Logloss_rgrs.append(logloss_score_rgr)
-
-        # Get rgr regular scores
-        BA_score_rgr = balanced_accuracy_score(y_test_class, y_pred_rgr_class)
-        F1_score_rgr = f1_score(y_test_class, y_pred_rgr_class)
-        kappa_score_rgr = cohen_kappa_score(y_test_class, y_pred_rgr_class)
-        pearsphi_score_rgr = matthews_corrcoef(y_test_class, y_pred_rgr_class)
-
-        # Append rgr regular scores
-        BA_rgrs.append(BA_score_rgr)
-        F1_rgrs.append(F1_score_rgr)
-        Kappa_rgrs.append(kappa_score_rgr)
-        Pearsphi_rgrs.append(pearsphi_score_rgr)
-
-    return BA
-
 def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, rgr):
     """
     Takes a meta-dictionary, training and test set. Fits a classifier and gets a classifier score. Fits a regressor, predicts, converts predictions
@@ -998,7 +783,7 @@ def accumulate_scores(score_dict_list):
 
     return accumulated_scores
 
-def save_pkl(score_dict = None, meta = None, parent_path = None):
+def save_pkl(score_dict = None, meta = None, pkl_path = None):
     """
     Takes a list BA which contains a meta-dictionary and algorithm metrics,
     and saves a PKL file with all the information.
@@ -1007,7 +792,7 @@ def save_pkl(score_dict = None, meta = None, parent_path = None):
         score_dict (dict): Dictionary containing keys for each score, and value of a list with regressor and classifier scores. (Default= 600)
 
     Returns:
-        600
+        None
 
     """
 
@@ -1024,27 +809,10 @@ def save_pkl(score_dict = None, meta = None, parent_path = None):
     # Define object to be saved to PKL
     pkl_data = [meta, score_dict]
 
-    # Define parent directory and specific directory
-    if not parent_path:
-        parent_path = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PKL'
-        foldpath = os.path.join(parent_path,
-                                str(dataset),
-                                str(testset),
-                                str(splitting),
-                                str(sample_size),
-                                str(noise_level),
-                                str(perc))
-    elif parent_path:
-        foldpath = os.path.join(r'C:\Users\skolmar\PycharmProjects\Dichotomization\PKL', parent_path)
-
-    # Check if directory path exists and make directory
-    if not os.path.exists(foldpath):
-        os.makedirs(foldpath)
-
     # Save PKL file
     uniq_tag = str(datetime.datetime.now().date()) + '_' + str(datetime.datetime.now().time()).replace(':', '.')
     pklfilename = f'{dataset}_{testset}_{splitting}_{sample_size}_{noise_level}_{perc}_{kfolds}_{name}_{uniq_tag}.pkl'                            
-    pklfile = os.path.join(foldpath, pklfilename)
+    pklfile = os.path.join(pkl_path, pklfilename)
     with open(pklfile, 'wb') as f:
         pickle.dump(pkl_data, f)
 
@@ -1052,6 +820,9 @@ def save_pkl(score_dict = None, meta = None, parent_path = None):
 
 def save_pkl_ssh(score_dict = None, meta = None, pkl_path = None):
     """ Save PKL data on a remote server. """
+
+    # Load dotenv
+    load_dotenv(dotenv_path=r'C:\Users\skolmar\PycharmProjects\Dichotomization\credentials.env')
 
     # Define server variables
     host = "cu.epa.gov"
@@ -1071,10 +842,6 @@ def save_pkl_ssh(score_dict = None, meta = None, pkl_path = None):
 
     # Define object to be saved to PKL
     pkl_data = [meta, score_dict]
-
-    # Check if directory path exists and make directory
-    if not os.path.exists(pkl_path):
-        os.makedirs(pkl_path)
 
     # Prepare PKL file name
     uniq_tag = str(datetime.datetime.now().date()) + '_' + str(datetime.datetime.now().time()).replace(':', '.')
