@@ -8,6 +8,7 @@ import random
 import datetime
 import paramiko
 from dotenv import load_dotenv
+import copy
 
 # Import sklearn
 from scipy.stats.stats import pearsonr, spearmanr, ttest_ind
@@ -101,8 +102,8 @@ class DataSet():
         # Set empty splitting and train test split variables
         self.k_folds = None
         self.splitting = None
-        self.training_sets = None
-        self.testing_sets = None
+        self.training_sets = {'X_train': [], 'y_train': []}
+        self.testing_sets = {'X_test': [], 'y_test': []}
 
         # Tups variable is a list, each member corresponds to a set of algorithms optimized
         # on the respective training set, in the same order
@@ -138,9 +139,6 @@ class DataSet():
             skf = KFold(n_splits= n_folds)
             skf.get_n_splits(self.X, self.y_true)
 
-        self.training_sets = {'X_train': [], 'y_train': []}
-        self.testing_sets = {'X_test': [], 'y_test': []}
-
         # Loop through splits
         for train_index, test_index in skf.split(self.X, self.y_true):
             # Get training and test sets from indices
@@ -167,12 +165,12 @@ class DataSet():
             return print("Cannot use train test split and kfold splitting simultaneously.")
 
         # split dataset into train and test sets
-        training_df = self.df.sample(frac=percentage)
-        test_df = self.df.loc[~self.df.index.isin(training_df.index)]
-        self.training_sets['X_train'].append(training_df.iloc[:, :-1])
-        self.training_sets['y_train'].append(training_df.iloc[:, -1])
-        self.testing_sets['X_test'].append(test_df.iloc[:,:-1])
-        self.testing_sets['y_test'].append(test_df.iloc[:,-1])
+        training_df = self.X.sample(frac=percentage)
+        test_df = self.X.loc[~self.X.index.isin(training_df.index)]
+        self.training_sets['X_train'].append(training_df)
+        self.training_sets['y_train'].append(self.y_true.iloc[training_df.index])
+        self.testing_sets['X_test'].append(test_df)
+        self.testing_sets['y_test'].append(self.y_true.iloc[test_df.index])
 
         # Set other conflicting variables
         self.k_folds = None
@@ -208,12 +206,11 @@ class DataSet():
         Returns:
             meta_dict (dict): Dictionary containing all the dataset attributes.
         """
-        meta_dict = {}
-        for key in vars(self):
-            if key not in ['csv', 'df', 'X', 'y_true', 'y_dict']:
-                meta_dict[key] = vars(self)[key]
+        meta_dict =  copy.deepcopy(self.__dict__)
+        for key in ['csv', 'df', 'X', 'y_true', 'y_dict']:
+            del meta_dict[key]
         
-        # Set the training sets to only be indices to save space
+        # # Set the training sets to only be indices to save space
         meta_dict['training_sets']['X_train'] = [x.index for x in meta_dict['training_sets']['X_train']]
         meta_dict['testing_sets']['X_test'] = [x.index for x in meta_dict['testing_sets']['X_test']]
 
@@ -227,7 +224,7 @@ class DataSet():
 
         return meta_dict
 
-    def generate_data(self, tups, test_set = 'True', use_ssh = False):
+    def generate_data(self, test_set = 'True', use_ssh = False):
         """
         Loops through each y column stored in y_dict (generated from sampleNoise()), generates 9
         binary splits on percentiles 10 through 90, and trains a classifier/regressor pair on each fold. Takes the average BA score for each fold
@@ -259,57 +256,78 @@ class DataSet():
             sigma = y_dict[lvl_dict]['sigma']
             noise_level = str(lvl_dict)
 
-            # Loop through classifier/regressor pairs in tups
-            for clf, rgr, alg_name in tups:
+            # Loop through each algorithm classifier/regressor pair
+            for alg_tup in self.tups:
+                for clf, rgr, alg_name in alg_tup:
 
-                # Loop through thresholds
-                threshes = [np.percentile(y, x) for x in [10, 20, 30, 40, 50, 60, 70, 80, 90]]
-                threshtup = list(zip(threshes, [10, 20, 30, 40, 50, 60, 70, 80, 90]))
-                for thresh, perc in threshtup:
+                    # Loop through thresholds
+                    threshes = [np.percentile(y, x) for x in [10, 20, 30, 40, 50, 60, 70, 80, 90]]
+                    threshtup = list(zip(threshes, [10, 20, 30, 40, 50, 60, 70, 80, 90]))
+                    for thresh, perc in threshtup:
 
-                    # Define estimator tuple
-                    estimator = [clf, rgr, alg_name]
+                        # Define estimator tuple
+                        estimator = [clf, rgr, alg_name]
 
-                    # Define meta dictionary from dataset attributes
-                    meta = self.make_meta_func()
+                        # Define meta dictionary from dataset attributes
+                        meta = self.make_meta_func()
 
-                    # Fill in meta dictionary from loop specific variables
-                    meta['Threshold'] = thresh
-                    meta['Percentile'] = perc
-                    meta['Algorithm'] = alg_name
-                    meta['Noise Level'] = noise_level
-                    meta['Sigma'] = sigma
-                    meta['Estimator'] = estimator
+                        # Fill in meta dictionary from loop specific variables
+                        meta['Threshold'] = thresh
+                        meta['Percentile'] = perc
+                        meta['Algorithm'] = alg_name
+                        meta['Noise Level'] = noise_level
+                        meta['Sigma'] = sigma
+                        meta['Estimator'] = estimator
 
-                    # Create the list of score dictionaries
-                    score_dict_list = []
+                        # Create the list of score dictionaries
+                        score_dict_list = []
 
-                    # Loop through each training set
-                    for i, training_set in enumerate(self.training_sets['X_train']):
-                        X_train = self.training_sets['X_train'][i]
-                        y_train = self.training_sets['y_train'][i]
-                        X_test = self.testing_sets['X_test'][i]
-                        y_test = self.testing_sets['y_test'][i]
+                        # Loop through each training set
+                        for i, training_set in enumerate(self.training_sets['X_train']):
+                            X_train = self.training_sets['X_train'][i]
+                            y_train = self.training_sets['y_train'][i]
+                            X_test = self.testing_sets['X_test'][i]
+                            y_test = self.testing_sets['y_test'][i]
 
-                        # Get score for single fold
-                        score_dict = get_clf_rgr_scores_test_set(thresh=thresh, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, clf = clf, rgr = rgr)
-                        score_dict_list.append(score_dict)
-                    
-                    # Accumulate scores
-                    accumulated_scores = accumulate_scores(score_dict_list)
+                            # # Make algorithms
+                            # if optimize_on:
+                            #     self.make_opt_algs(X = X_train, y = y_train, optimize_on = optimize_on)
+                            # else:
+                            #     self.make_algs()
 
-                    # Save accumulated score dictionary
-                    if use_ssh:
-                        save_pkl_ssh(score_dict = accumulated_scores, meta = meta, pkl_path = self.parent_path)
-                    else:
-                        save_pkl(score_dict = accumulated_scores, meta = meta, pkl_path = self.parent_path)
+                            # Get score for single fold
+                            score_dict = get_clf_rgr_scores_test_set(thresh=thresh, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, clf = clf, rgr = rgr)
+                            score_dict_list.append(score_dict)
+                        
+                        # Accumulate scores
+                        accumulated_scores = accumulate_scores(score_dict_list)
 
-                    # Print statements
-                    print(f'Dataset: {dataset_name}\n Noise Level: {noise_level}\n Split: {perc}\n Variables: {num_features}\n')
-                    for key in accumulated_scores.keys():
-                        print(f"{meta['Algorithm']} Classifier {key}: {np.average(accumulated_scores[key]['Clfs'])} +/- {np.std(accumulated_scores[key]['Clfs'])}")                                   
-                        print(f"{meta['Algorithm']} Regressor {key}: {np.average(accumulated_scores[key]['Rgrs'])} +/- {np.std(accumulated_scores[key]['Rgrs'])}")                                            
-                        print('\n')
+                        # Save by SSH or locally
+                        if use_ssh:
+
+                            # Save accumulated score dictionary
+                            print('Saving to Server via SSH')
+                            save_pkl_ssh(score_dict = accumulated_scores, meta = meta, pkl_path = self.parent_path)
+
+                            # Print statements
+                            print(f'Dataset: {dataset_name}\n Noise Level: {noise_level}\n Split: {perc}\n Variables: {num_features}\n')
+                            for key in accumulated_scores.keys():
+                                print(f"{meta['Algorithm']} Classifier {key}: {np.average(accumulated_scores[key]['Clfs'])} +/- {np.std(accumulated_scores[key]['Clfs'])}")                                   
+                                print(f"{meta['Algorithm']} Regressor {key}: {np.average(accumulated_scores[key]['Rgrs'])} +/- {np.std(accumulated_scores[key]['Rgrs'])}")                                            
+                                print('\n')
+                        
+                        elif use_ssh is False:
+
+                            # Save accumulated score dictionary
+                            print('Saving Locally')
+                            save_pkl(score_dict = accumulated_scores, meta = meta, pkl_path = self.parent_path)
+
+                            # Print statements
+                            print(f'Dataset: {dataset_name}\n Noise Level: {noise_level}\n Split: {perc}\n Variables: {num_features}\n')
+                            for key in accumulated_scores.keys():
+                                print(f"{meta['Algorithm']} Classifier {key}: {np.average(accumulated_scores[key]['Clfs'])} +/- {np.std(accumulated_scores[key]['Clfs'])}")                                   
+                                print(f"{meta['Algorithm']} Regressor {key}: {np.average(accumulated_scores[key]['Rgrs'])} +/- {np.std(accumulated_scores[key]['Rgrs'])}")                                            
+                                print('\n')
 
         return None
 #---------------------
@@ -321,7 +339,7 @@ class DataSet():
         Uses StandardScaler() to scale X data of the dataset.
         """
         # Give error if train test split already performed
-        if not isinstance(self.train, type(None)):
+        if self.training_sets['X_train']:
             return print("Must scale X before train test split.")
 
         scaler = StandardScaler()
@@ -338,8 +356,11 @@ class DataSet():
         Drops features with variance below a certain threshold
         """
         # Give error if train test split already performed
-        if not isinstance(self.train, type(None)):
+        if self.training_sets['X_train']:
             return print("Must drop low variance features before train test split")
+
+        # selector = VarianceThreshold(threshold=threshold)
+        # selector.fit_transform(self.X)
 
         # Get variance and assign to dataframe where feature variables are rows
         variance = self.X.var()
@@ -364,7 +385,7 @@ class DataSet():
         Drops correlated feature variables above the supplied threshold.
         """
         # Give error if train test split already performed
-        if not isinstance(self.train, type(None)):
+        if self.training_sets['X_train']:
             return print("Must drop correlated features before train test split.")
 
         # Create correlation matrix
@@ -476,7 +497,7 @@ class DataSet():
         names = ['KNN', 'DT', 'SVM', 'RF']
         tups = list(zip(clf_list, rgr_list, names))
 
-        self.tups = tups
+        self.tups.append(tups)
 
         return None
     
@@ -699,10 +720,11 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, r
 
     # Define categorized variables
     y_train_class = pd.DataFrame(twobin_v(y_train, thresh = thresh), index= y_train.index)
+    y_train_class_vals = y_train_class.iloc[:].values.ravel()
     y_test_class = pd.DataFrame(twobin_v(y_test, thresh=thresh), index=y_test.index)
 
     # Fit Clf
-    clf.fit(X_train, y_train_class.values.ravel())
+    clf.fit(X_train, y_train_class_vals)
 
     # Classifier probabilistic scores
     y_prob_clf = clf.predict_proba(X_test)
@@ -719,7 +741,7 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, r
 
     # Fit and predict with rgr and get score
     log = LogisticRegression(max_iter= 1000, solver = 'liblinear')
-    rgr.fit(X_train, y_train.ravel())
+    rgr.fit(X_train, y_train.values.ravel())
     y_pred_rgr = rgr.predict(X_test)
     y_pred_rgr_class = twobin_v(y_pred_rgr, thresh=thresh)
 
