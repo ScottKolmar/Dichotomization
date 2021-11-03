@@ -288,9 +288,15 @@ class DataSet():
 
                     # Optimize algorithm if needed
                     if optimize_on:
-                        self.optimize_alg(tup = alg_tup, X = X_train, y = y_train, meta_dict = meta, optimize_on = optimize_on)
+                        if alg_name == 'DNN':
+                            _
+                        else:
+                            self.optimize_alg(tup = alg_tup, X = X_train, y = y_train, meta_dict = meta, optimize_on = optimize_on)
                     else:
-                        meta['training_set_params'].append(rgr.get_params(deep=True))
+                        if alg_name == 'DNN':
+                            _
+                        else:
+                            meta['training_set_params'].append(rgr.get_params(deep=True))
 
                     # Create list of score dicts which contains scores for all thresholds
                     fold_score_dict_list = []
@@ -486,113 +492,6 @@ class DataSet():
         tups = zip(clf_list, rgr_list, names)
         tup_list = list(tups)
         self.tups.extend(tup_list)
-
-        return None
-    
-    # DEPRECATED
-    def make_opt_algs(self, X, y, optimize_on = ['Continuous', 'Categorical']):
-        """
-
-        Optimizes algorithms via GridSearchCV and returns a tuple of optimized clfs and rgrs.
-
-        Inputs:
-        optimize_on (String): 'Continuous' will optimize on continuous dataset, and 'Categorical' will optimize on categorical dataset.
-        """
-
-        # Instantiate Classifiers
-        knn = KNeighborsClassifier(weights='distance')
-        dt = DecisionTreeClassifier(max_features= 'auto', criterion= 'gini')
-        svc = SVC(probability=True)
-        rf = RandomForestClassifier(criterion= 'gini')
-        clf_list = [knn, dt, svc, rf]
-
-        # Instantiate Regressors
-        knnr = KNeighborsRegressor(weights='distance')
-        dtr = DecisionTreeRegressor(max_features= 'auto', criterion= 'mse')
-        svr = SVR()
-        rfr = RandomForestRegressor(criterion= 'mse')
-        rgr_list = [knnr, dtr, svr, rfr]
-
-        # Define rgr param grids
-        dt_dict = {
-            'max_depth': [50, 100, 200, 500],
-            'min_samples_split': [2, 5, 10, 20, 40],
-            'min_samples_leaf': [1, 5, 10, 20]
-            }
-
-        knn_dict = {
-            'n_neighbors': np.arange(2, 22, 1)
-            }
-
-        svm_dict = {
-            'kernel': ['sigmoid', 'rbf'],
-            'C': [0.001, 0.01, 0.1, 1, 10]
-            }
-
-        rf_dict = {
-            'n_estimators': [10, 25, 50, 100, 150, 200],
-            'max_depth': [50, 100, 200, 500],
-            'min_samples_split': [2, 5, 10, 20, 40],
-            'min_samples_leaf': [1, 5, 10, 20]
-            }
-
-        if optimize_on == 'Continuous':
-            
-            # Make rgr GridSearch
-            knn_search = GridSearchCV(estimator = knnr, param_grid = knn_dict, n_jobs = -1, verbose= 10)
-            dt_search = GridSearchCV(estimator = dtr, param_grid = dt_dict, n_jobs = -1, verbose= 10)
-            svm_search = GridSearchCV(estimator = svr, param_grid = svm_dict, n_jobs = -1, verbose= 10)
-            rf_search = GridSearchCV(estimator = rfr, param_grid = rf_dict, n_jobs = -1, verbose= 10)
-            searches = [knn_search, dt_search, svm_search, rf_search]
-
-            # Set dataset variable
-            self.optimized_on_ = 'Continuous'
-
-        elif optimize_on == 'Categorical':
-
-            # Set scoring function as multiple metrics
-            scoring = ['balanced_accuracy', 'f1', 'roc_auc', 'neg_brier_score']
-
-            # Make clf GridSearch
-            knn_search = GridSearchCV(estimator = knn, param_grid = knn_dict, n_jobs = -1, verbose= 10, scoring= scoring, refit = 'f1')
-            dt_search = GridSearchCV(estimator = dt, param_grid = dt_dict, n_jobs = -1, verbose= 10, scoring= scoring, refit = 'f1')
-            svm_search = GridSearchCV(estimator = svc, param_grid = svm_dict, n_jobs = -1, verbose= 10, scoring= scoring, refit = 'f1')
-            rf_search = GridSearchCV(estimator = rf, param_grid = rf_dict, n_jobs = -1, verbose= 10, scoring= scoring, refit = 'f1')
-            searches = [knn_search, dt_search, svm_search, rf_search]
-
-            # Set y to be categorical
-            # Vectorize binning function
-            twobin_v = np.vectorize(two_binner)
-            thresh = np.median(y)
-            y = twobin_v(y, thresh = thresh)
-
-            # Set dataset variable
-            self.optimized_on_ = f'Categorical: {thresh}'
-
-        # Make names and zip into tuples
-        gridnames = ['KNNOpt', 'DTOpt', 'SVMOpt', 'RFOpt']
-
-        # Fit searches
-        for i,search in enumerate(searches):
-            
-            # Fit the gridsearch
-            search.fit(X, y)
-            opt_params = search.best_params_
-
-            # Set the parameters of the regressor
-            rgr = rgr_list[i]
-            rgr.set_params(**opt_params)
-
-            # Set the parameters of the classifier
-            clf = clf_list[i]
-            clf.set_params(**opt_params)
-
-        # Reinstantiate as new tuple and add to list
-        names = ['KNN', 'DT', 'SVM', 'RF']
-        tups = list(zip(clf_list, rgr_list, names))
-
-        # Append to class variable
-        self.tups.append(tups)
 
         return None
     
