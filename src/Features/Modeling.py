@@ -683,16 +683,16 @@ class DataSet():
         self.dnn_directories['rgr_directory'] = r'C:\Users\skolmar\PycharmProjects\Modeling\Dichotomization\DNN_Tuner_tmp\Rgr_tmp'
 
         # Instantiate Classifier
-        dnn_clf = 'This is a DNN Clf placeholder'
+        dnn_clf = class_dnn_model_builder(hp=None, output_bias = None)
 
         # Instantiate Regressor
-        dnn_rgr = 'This is a DNN Rgr placeholder'
+        dnn_rgr = reg_dnn_model_builder(hp=None)
 
         # Instantiate Name
         dnn_name = 'DNN'
 
         # Add DNN tup to class attribute
-        dnn_tup = zip(dnn_clf, dnn_rgr, dnn_name)
+        dnn_tup = (dnn_clf, dnn_rgr, dnn_name)
         self.tups.append(dnn_tup)
 
         return None
@@ -985,21 +985,25 @@ def save_pkl_ssh(score_dict = None, meta = None, pkl_path = None):
 # DNN MODEL BUILDERS
 ###############################
 
-def reg_dnn_model_builder(hp, X_train):
+def reg_dnn_model_builder(hp):
     """ Builds and compiles a regressor DNN model"""
-    
-    # Initialize normalizer and adapt to X_train
-    normalizer = layers.Normalization(axis=-1)
-    normalizer.adapt(np.array(X_train))
 
-    # Add normalizer to model
-    model = keras.Sequential([normalizer])
+    # Define sequential model
+    model = keras.Sequential()
 
     # Define unit optimization
-    hp_units = hp.Int('units', min_value=32, max_value=512, step=64)
+    if hp is not None:
+        hp_units = hp.Int('units', min_value=32, max_value=512, step=64)
+    else:
+        hp_units = 32
 
     # Define layer optimization
-    for i in range(hp.Int('n_layers', 2, 8)):
+    if hp is not None:
+        hp_layers = hp.Int('n_layers', 2, 8)
+    else:
+        hp_layers = 5
+    
+    for i in range(hp_layers):
         model.add(
             layers.Dense(
             units=hp_units,
@@ -1015,7 +1019,10 @@ def reg_dnn_model_builder(hp, X_train):
     model.add(layers.Dense(1))
 
     # Define learning rate optimization
-    hp_learning_rate = hp.Choice('learning_rate', values=[0.001, 0.0001, 0.00001])
+    if hp is not None:
+        hp_learning_rate = hp.Choice('learning_rate', values=[0.001, 0.0001, 0.00001])
+    else:
+        hp_learning_rate = 0.001
 
     # Compile model
     model.compile(
@@ -1026,24 +1033,30 @@ def reg_dnn_model_builder(hp, X_train):
 
     return model
         
-def class_dnn_model_builder(hp, X_train, output_bias):
+def class_dnn_model_builder(hp, output_bias):
     """ Builds and compiles a classification DNN model"""
-
-    # Initialize normalizer and adapt to X_train
-    normalizer = layers.Normalization(axis=-1)
-    normalizer.adapt(np.array(X_train))
     
     # Transform output bias
     if output_bias is not None:
         output_bias = tf.keras.initializers.Constant(output_bias)
     
     # Define unit optimization
-    hp_units = hp.Int('units', min_value=32, max_value=512, step=64)
+    if hp is not None:
+        hp_units = hp.Int('units', min_value=32, max_value=512, step=64)
+    else:
+        hp_units = 32
 
-    model = keras.Sequential([normalizer])
+    # Define sequential model
+    model = keras.Sequential()
 
     # Define layer optimizations
-    for i in range(hp.Int('n_layers', 2, 8)):
+    if hp is not None:
+        hp_layers = hp.Int('n_layers', 2, 8)
+    else:
+        hp_layers = 5
+    
+    # Loop to create layers
+    for i in range(hp_layers):
         model.add(
             layers.Dense(
             units=hp_units,
@@ -1061,18 +1074,22 @@ def class_dnn_model_builder(hp, X_train, output_bias):
     )
 
     # Define learning rate optimization
-    hp_learning_rate = hp.Choice('learning_rate', values=[0.001, 0.0001, 0.00001])
+    if hp is not None:
+        hp_learning_rate = hp.Choice('learning_rate', values=[0.001, 0.0001, 0.00001])
+    else:
+        hp_learning_rate = 0.001
 
     # Compile model
     model.compile(
         loss=losses.BinaryCrossentropy(),
-        optimizer=optimizers.Adam(learning_rate=hp_learning_rate),
+        optimizer=optimizers.Adagrad(learning_rate=hp_learning_rate),
         metrics=[
             metrics.BinaryAccuracy(name='binary_accuracy'),
-            tfa.metrics.F1Score(name='f1_score'),
-            tfa.metrics.CohenKappa(name='cohen_kappa'),
-            tfa.metrics.MatthewsCorrelationCoefficient(name='matthews'),
+            tfa.metrics.F1Score(name='f1_score', num_classes = 2),
+            tfa.metrics.CohenKappa(name='cohen_kappa', num_classes = 2),
+            tfa.metrics.MatthewsCorrelationCoefficient(name='matthews', num_classes = 2),
             metrics.AUC(name='AUC'),
             ]
         )
+
     return model
