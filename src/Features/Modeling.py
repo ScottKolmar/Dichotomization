@@ -117,7 +117,7 @@ class DataSet():
 
         # Tups variable is a list, each member corresponds to a set of algorithms optimized
         # on the respective training set, in the same order
-        self.tups = None
+        self.tups = []
         
         # Set preprocessing variables to false
         self.var_filter_ = {'filtered': False, 'Value': None}
@@ -317,12 +317,7 @@ class DataSet():
                 save_pkl(score_dict = alg_score_list, meta = meta, pkl_path = self.parent_path)
 
         return None
-    
-    def generate_dnn_data(self):
-        """ Generates data using an optimized DNN."""
 
-
-        return None
 #---------------------
 # PREPROCESSING
 #---------------------
@@ -489,8 +484,8 @@ class DataSet():
         # Reinstantiate as new tuple and add to list
         names = ['KNN', 'DT', 'SVM', 'RF']
         tups = zip(clf_list, rgr_list, names)
-
-        self.tups = list(tups)
+        tup_list = list(tups)
+        self.tups.extend(tup_list)
 
         return None
     
@@ -679,11 +674,27 @@ class DataSet():
 
         return None
     
-    def make_dnn(self, X_train, optimize_on = ['Continuous', 'Categorical']):
-        """ Makes a DNN regressor classifier pair. """
-        
-        
-        
+    def make_dnns(self):
+        """ Makes DNN rgr/clf pair and adds to tups attribute."""
+
+        # Define dnn_tuner directories
+        self.dnn_directories = {}
+        self.dnn_directories['clf_directory'] = r'C:\Users\skolmar\PycharmProjects\Modeling\Dichotomization\DNN_Tuner_tmp\Clf_tmp'
+        self.dnn_directories['rgr_directory'] = r'C:\Users\skolmar\PycharmProjects\Modeling\Dichotomization\DNN_Tuner_tmp\Rgr_tmp'
+
+        # Instantiate Classifier
+        dnn_clf = 'This is a DNN Clf placeholder'
+
+        # Instantiate Regressor
+        dnn_rgr = 'This is a DNN Rgr placeholder'
+
+        # Instantiate Name
+        dnn_name = 'DNN'
+
+        # Add DNN tup to class attribute
+        dnn_tup = zip(dnn_clf, dnn_rgr, dnn_name)
+        self.tups.append(dnn_tup)
+
         return None
 
 #----------------------------
@@ -803,7 +814,11 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, r
 
     # Fit Clf
     if type(clf) == 'keras.engine.sequential.Sequential':
-        class_history = clf.fit(X_train, y_train, validation_split=0.2, verbose=0, epochs=200)
+        num_neg = _
+        num_pos = _
+        num_total = _
+        class_weight = {0: (1/num_neg) * (num_total/2), 1: (1/num_pos) * (num_total/2)}
+        clf.fit(X_train, y_train, validation_split=0.2, verbose=0, epochs=200, class_weight=class_weight)
 
     else:
         clf.fit(X_train, y_train_class_vals)
@@ -966,8 +981,11 @@ def save_pkl_ssh(score_dict = None, meta = None, pkl_path = None):
     ssh.close()
 
     return None
+###############################
+# DNN MODEL BUILDERS
+###############################
 
-def reg_model_builder(hp, X_train):
+def reg_dnn_model_builder(hp, X_train):
     """ Builds and compiles a regressor DNN model"""
     
     # Initialize normalizer and adapt to X_train
@@ -1003,12 +1021,12 @@ def reg_model_builder(hp, X_train):
     model.compile(
         optimizer=optimizers.Adagrad(learning_rate=hp_learning_rate),
         loss='root_mean_squared_error',
-        metrics=[tfa.metrics.RSquare(y_shape=(1,))]
+        metrics=[metrics.RootMeanSquaredError(), tfa.metrics.RSquare(y_shape=(1,))]
         )
 
     return model
         
-def class_model_builder(hp, X_train, output_bias):
+def class_dnn_model_builder(hp, X_train, output_bias):
     """ Builds and compiles a classification DNN model"""
 
     # Initialize normalizer and adapt to X_train
