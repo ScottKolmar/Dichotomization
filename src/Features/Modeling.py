@@ -289,12 +289,12 @@ class DataSet():
                     # Optimize algorithm if needed
                     if optimize_on:
                         if alg_name == 'DNN':
-                            _
+                            self.optimize_dnns(X_train = X_train, y_train = y_train, optimize_on = optimize_on)
                         else:
                             self.optimize_alg(tup = alg_tup, X = X_train, y = y_train, meta_dict = meta, optimize_on = optimize_on)
                     else:
                         if alg_name == 'DNN':
-                            _
+                            meta['training_set_params'].append(rgr.get_config())
                         else:
                             meta['training_set_params'].append(rgr.get_params(deep=True))
 
@@ -573,6 +573,118 @@ class DataSet():
 
         return None
     
+    def optimize_dnns(self, X_train, y_train, optimize_on):
+        """ Optimizes DNNS. """
+
+        if optimize_on == 'Categorical':
+
+            # Set class variable
+            self.optimized_on = 'Categorical'
+
+            # Set y to be categorical
+            # Vectorize binning function
+            twobin_v = np.vectorize(two_binner)
+            thresh = np.median(self.y_true)
+            y_class = twobin_v(y_train, thresh = thresh)
+
+            # Calculate output bias for classifier
+            num_pos = y_class.sum()
+            num_neg = len(y_class) - num_pos
+            num_total = len(y_class)
+            output_bias = np.log(num_pos/num_neg)
+            class_weight = {0: (1/num_neg) * (num_total/2), 1: (1/num_pos) * (num_total/2)}
+
+            # Optimize with tuner
+            tuner = kt.BayesianOptimization(
+                class_dnn_model_builder,
+                objective='val_loss',
+                overwrite=True,
+                max_trials=45,
+                directory=self.dnn_directories['clf_directory']
+                )
+            tuner.search(X_train, y_class, epochs=75, validation_split=0.2, class_weight=class_weight)
+            best_hps = tuner.get_best_hyperparameters()[0]
+
+            print('DNN CLASSIFICATION MODEL HYPERPARAMETERS:')
+            print(best_hps)
+            print(tuner.get_best_models()[0].summary())
+
+            # Set hyperparameters of clf
+            optimized_clf_model = class_dnn_model_builder(best_hps, output_bias=output_bias)
+            dnn_clf_model = self.tups[-1][0]
+            dnn_clf_model.from_config(optimized_clf_model.get_config())
+            dnn_clf_model.compile(
+                loss=losses.BinaryCrossentropy(),
+                optimizer=optimizers.Adagrad().from_config(optimized_clf_model.optimizer.get_config()),
+                metrics=[
+                    metrics.BinaryAccuracy(name='binary_accuracy'),
+                    tfa.metrics.F1Score(name='f1_score', num_classes = 2),
+                    tfa.metrics.CohenKappa(name='cohen_kappa', num_classes = 2),
+                    tfa.metrics.MatthewsCorrelationCoefficient(name='matthews', num_classes = 2),
+                    metrics.AUC(name='AUC')
+                    ]
+                )
+
+            # Set hyperparameters of rgr changing the ouput layer's activation to linear
+            dnn_rgr_model = self.tups[-1][1]
+            dnn_rgr_model.from_config(dnn_clf_model.get_config())
+            dnn_rgr_model.layers[-1] = layers.Dense(1)
+            dnn_rgr_model.compile(
+                loss=losses.MeanSquaredError(),
+                optimizer=optimizers.Adagrad().from_config(dnn_clf_model.optimizer.get_config()),
+                metrics=[metrics.RootMeanSquaredError(),
+                tfa.metrics.RSquare(y_shape=(1,))]
+                )
+
+        elif optimize_on == 'Continuous':
+            
+            # Set class variable
+            self.optimized_on = 'Continuous'
+
+            # Optimize with tuner
+            tuner = kt.BayesianOptimization(
+                reg_dnn_model_builder,
+                objective='val_loss',
+                overwrite=True,
+                max_trials=45,
+                directory=self.dnn_directories['rgr_directory']
+                )
+            tuner.search(X_train, y_train, epochs=75, validation_split=0.2)
+            best_hps = tuner.get_best_hyperparameters()[0]
+
+            print('DNN REGRESSION MODEL HYPERPARAMETERS:')
+            print(best_hps)
+            print(tuner.get_best_models()[0].summary())
+
+            # Set hyperparameters of rgr
+            optimized_rgr_model = reg_dnn_model_builder(best_hps)
+            dnn_rgr_model = self.tups[-1][1]
+            dnn_rgr_model.from_config(optimized_rgr_model.get_config())
+            dnn_rgr_model.compile(
+                loss=losses.MeanSquaredError(),
+                optimizer=optimizers.Adagrad().from_config(optimized_rgr_model.optimizer.get_config()),
+                metrics=[metrics.RootMeanSquaredError(),
+                tfa.metrics.RSquare(y_shape=(1,))]
+            )
+
+            # Set hyperparameters of clf changing the ouput layer's activation to sigmoid
+            dnn_clf_model = self.tups[-1][0]
+            dnn_clf_model.from_config(dnn_rgr_model.get_config())
+            dnn_clf_model.layers[-1] = layers.Dense(1, activation='sigmoid')
+            dnn_clf_model.compile(
+                loss=losses.BinaryCrossentropy(),
+                optimizer=optimizers.Adagrad().from_config(dnn_rgr_model.optimizer.get_config()),
+                metrics=[
+                    metrics.BinaryAccuracy(name='binary_accuracy'),
+                    tfa.metrics.F1Score(name='f1_score', num_classes = 2),
+                    tfa.metrics.CohenKappa(name='cohen_kappa', num_classes = 2),
+                    tfa.metrics.MatthewsCorrelationCoefficient(name='matthews', num_classes = 2),
+                    metrics.AUC(name='AUC')
+                    ]
+                )
+
+        return None
+    
     def make_dnns(self):
         """ Makes DNN rgr/clf pair and adds to tups attribute."""
 
@@ -711,35 +823,53 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, r
     y_train_class_vals = y_train_class.iloc[:].values.ravel()
     y_test_class = pd.DataFrame(twobin_v(y_test, thresh=thresh), index=y_test.index)
 
-    # Fit Clf
+    # Fit Clf if DNN
     if type(clf) == 'keras.engine.sequential.Sequential':
-        num_neg = _
-        num_pos = _
-        num_total = _
-        class_weight = {0: (1/num_neg) * (num_total/2), 1: (1/num_pos) * (num_total/2)}
-        clf.fit(X_train, y_train, validation_split=0.2, verbose=0, epochs=200, class_weight=class_weight)
 
+        # Calculate class weights again
+        num_pos = y_train.sum()
+        num_neg = len(y_train_class) - num_pos
+        num_total = len(y_train_class)
+        class_weight = {0: (1/num_neg) * (num_total/2.0), 1: (1/num_pos) * (num_total/2.0)}
+
+        # Fit DNN
+        clf.fit(X_train, y_train_class_vals, validation_split=0.2, verbose=0, epochs=45, class_weight=class_weight)
+
+        # DNN output is probabilistic, so convert to binary predictions manually
+        y_prob_clf = clf.predict(X_test).flatten()
+        y_pred_clf = (y_prob_clf > 0.5).astype(int)
+
+    # Fit clf if NOT DNN
     else:
         clf.fit(X_train, y_train_class_vals)
+        y_prob_clf = clf.predict_proba(X_test)[:,1]
+        y_pred_clf = clf.predict(X_test)
 
     # Classifier probabilistic scores
-    y_prob_clf = clf.predict_proba(X_test)
-    roc_score_clf = roc_auc_score(y_test_class, y_prob_clf[:,1])
-    brier_score_clf = brier_score_loss(y_test_class, y_prob_clf[:,1])
-    logloss_score_clf = log_loss(y_test_class, y_prob_clf[:,1])
+    roc_score_clf = roc_auc_score(y_test_class, y_prob_clf)
+    brier_score_clf = brier_score_loss(y_test_class, y_prob_clf)
+    logloss_score_clf = log_loss(y_test_class, y_prob_clf)
 
     # Classifier regular scores
-    y_pred_clf = clf.predict(X_test)
     BA_score_clf = balanced_accuracy_score(y_test_class, y_pred_clf)
     F1_score_clf = f1_score(y_test_class, y_pred_clf)
     kappa_score_clf = cohen_kappa_score(y_test_class, y_pred_clf)
     pearsphi_score_clf = matthews_corrcoef(y_test_class, y_pred_clf)
 
-    # Fit and predict with rgr and get score
+    # Define logistic regressor to get probabilistic scores
     log = LogisticRegression(max_iter= 1000, solver = 'liblinear')
-    rgr.fit(X_train, y_train.values.ravel())
-    y_pred_rgr = rgr.predict(X_test)
-    y_pred_rgr_class = twobin_v(y_pred_rgr, thresh=thresh)
+
+    # Fit with DNN
+    if type(rgr) == 'keras.engine.sequential.Sequential':
+        rgr.fit(X_train, y_train.values.ravel(), validation_split=0.2, verbose=0, epochs=45)
+        y_pred_rgr = rgr.predict(X_test).flatten()
+        y_pred_rgr_class = twobin_v(y_pred_rgr, thresh=thresh)
+    
+    # Fit with NOT DNN
+    else:
+        rgr.fit(X_train, y_train.values.ravel())
+        y_pred_rgr = rgr.predict(X_test)
+        y_pred_rgr_class = twobin_v(y_pred_rgr, thresh=thresh)
 
     # Try except block to handle ValueError for having only a single class in a test set
     logregerror = False
