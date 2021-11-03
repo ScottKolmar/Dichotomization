@@ -16,15 +16,42 @@ class scoreSheet():
     """
 
     def __init__(self):
-        scorenames = ['BA', 'F1', 'ROC-AUC', 'Brier', 'Kappa', 'Logloss', 'Pearsphi']
-        for name in scorenames:
-            # Store scores as dataframes inside of a dictionary
-            setattr(self, name, {'clf': pd.DataFrame(),
-                                 'rgr': pd.DataFrame()})
+
+        # Make list of score keys
+        self.score_key_list = ['BA', 'Brier', 'F1', 'Kappa', 'Logloss', 'Pearsphi', 'ROC-AUC']
+
+        # Make new dictionary for averaging
+        self.ave_dict = {}
+        for thresh in range(10, 100, 10):
+            self.ave_dict[thresh] = {}
+            for score_key in self.score_key_list:
+                self.ave_dict[thresh][score_key] = {'Clfs': [], 'Rgrs': []}
+        
+        return None
 
     def __iter__(self):
         for attr, value in self.__dict__.iteritems():
             yield attr, value
+    
+    def refined_load_scores(self, pkl_file):
+        """ Loads scores from pkl file into score sheet object. """
+
+        # Load data from PKL
+        pkl_dict = pickle.load(open(pkl_file, 'rb'))
+        self.meta_dict = pkl_dict[0]
+        list_of_fold_scores = pkl_dict[1]
+        
+        # Retrieve scores from PKL data and put into new dictionary for averaging
+        for fold_score in list_of_fold_scores:
+            for score_key in self.score_key_list:
+                for i,thresh_score in enumerate(fold_score):
+                    thresh_key = i*10 + 10
+                    clf_score = thresh_score[score_key]['Clfs']
+                    rgr_score = thresh_score[score_key]['Rgrs']
+                    self.ave_dict[thresh_key][score_key]['Clfs'].append(clf_score)
+                    self.ave_dict[thresh_key][score_key]['Rgrs'].append(rgr_score)
+        
+        return None
 
     def load_scores(self, pklfile):
         BA = pickle.load(open(pklfile, 'rb'))
@@ -32,9 +59,9 @@ class scoreSheet():
         scores = BA[1]
 
         # Remove key-value pairs from meta dict that cause problems for Pandas
-        del meta['features']
-        del meta['Estimator']
-        del meta['tups']
+        # del meta['features']
+        # del meta['Estimator']
+        # del meta['tups']
 
         # Iterate through each score
         for key in scores.keys():
@@ -63,6 +90,145 @@ class scoreSheet():
             # Append rows to prior dataframes
             self.__getattribute__(str(key))['clf'] = self.__getattribute__(str(key))['clf'].append(clf_data, ignore_index=True)
             self.__getattribute__(str(key))['rgr'] = self.__getattribute__(str(key))['rgr'].append(rgr_data, ignore_index=True)
+        
+        return None
+    
+    def refined_plot_scores(self, png_path):
+        """ Plots scores. """
+
+        for score_key in self.score_key_list:
+            x_axis = range(10,100,10)
+            nobs_clf = np.array([len(self.ave_dict[thresh_key][score_key]['Clfs']) for thresh_key in x_axis])
+            nobs_rgr = np.array([len(self.ave_dict[thresh_key][score_key]['Rgrs']) for thresh_key in x_axis])
+            clf_aves = [np.average(self.ave_dict[thresh_key][score_key]['Clfs']) for thresh_key in x_axis]
+            rgr_aves = [np.average(self.ave_dict[thresh_key][score_key]['Rgrs']) for thresh_key in x_axis]
+            clf_stds = [np.std(self.ave_dict[thresh_key][score_key]['Clfs']) for thresh_key in x_axis]
+            rgr_stds = [np.std(self.ave_dict[thresh_key][score_key]['Rgrs']) for thresh_key in x_axis]
+            ttest_stat, ttest_ps = ttest_ind_from_stats(mean1=clf_aves, std1=clf_stds, nobs1=nobs_clf, mean2=rgr_aves, std2=rgr_stds, nobs2=nobs_rgr)
+            
+            # Make plots
+            fig, ax = plt.subplots(1,1)
+            plt.errorbar(x = range(10,100,10), y=clf_aves, yerr=clf_stds, label = 'Clf')
+            plt.errorbar(x = range(10,100,10), y=rgr_aves, yerr=rgr_stds, label = 'Rgr')
+
+            # Annotate with asterisk if p < 0.05
+            for i,ttest_p in enumerate(ttest_ps):
+                if ttest_p < 0.05:
+                    ax.annotate("*", xy=(x_axis[i], clf_aves[i] + clf_stds[i]), xycoords='data', size =12)
+
+            # Set labels
+            plt.legend()
+            plt.xlabel('Percentile')
+            plt.ylabel(f'{score_key} Ave.')
+            plt.title(self.meta_dict['Algorithm'])
+            
+            # Save figure and close
+            dataset = self.meta_dict['name']
+            splitting = self.meta_dict['splitting']
+            kfolds = self.meta_dict['k_folds']
+            sample_size = self.meta_dict['sample_size']
+            noise_level = self.meta_dict['Noise Level']
+            name = self.meta_dict['Algorithm']
+            png_file_name = f'{dataset}_{splitting}_kfolds_{kfolds}_{sample_size}_{noise_level}_{score_key}_{name}.png'
+            plt.savefig(os.path.join(png_path, png_file_name))
+            plt.close()
+
+        return None
+        
+    def plot_scores(self, search_dict = None, png_path = None):
+        """ Plots scores. """
+
+        # Load dataframes as function variables for manipulation, leaving class variables unaffected
+        for key in vars(self).keys():
+            df_clf = self.__getattribute__(str(key))['clf']
+            df_rgr = self.__getattribute__(str(key))['rgr']
+
+            # Require that the search_dict have at least a filter for algorithm
+            if not search_dict:
+                print("User must provide at least a filter for algorithm in search_dict via 'Algorithm': value")
+                return
+
+            elif 'Algorithm' not in search_dict.keys():
+                print("User must provide at least a filter for algorithm in search_dict via 'Algorithm': value")
+                return
+
+            else:
+
+                # Apply each filter in search_dict keys
+                for search_key in search_dict.keys():
+                    df_clf = df_clf[df_clf[search_key] == search_dict[search_key]]
+                    df_rgr = df_rgr[df_rgr[search_key] == search_dict[search_key]]
+
+                # Print error statement if filter results in empty df
+                if df_clf.empty:
+                    print('Filtering has produced an empty classifier dataframe.')
+
+                elif df_rgr.empty:
+                    print('Filtering has produced an empty regressor dataframe.')
+
+                else:
+                    
+                    # Calculate averages, std, and ttest
+                    clf_x = df_clf.groupby(['Percentile']).mean().index
+                    clf_ave = df_clf.groupby(['Percentile']).mean()['score']
+                    clf_std = df_clf.groupby(['Percentile']).std()['score']
+                    rgr_x = df_rgr.groupby(['Percentile']).mean().index
+                    rgr_ave = df_rgr.groupby(['Percentile']).mean()['score']
+                    rgr_std = df_rgr.groupby(['Percentile']).std()['score']
+                    ttest_stat, ttest_p = ttest_ind_from_stats(mean1=clf_ave, std1=clf_std, nobs1=len(clf_x), mean2=rgr_ave, std2=rgr_std, nobs2=len(rgr_x))
+
+                    # Make figure with annotations
+                    fig, ax = plt.subplots(1,1)
+                    plt.errorbar(x=clf_x, y=clf_ave, yerr=clf_std, label='Clf')
+                    plt.errorbar(x=rgr_x, y=rgr_ave, yerr=rgr_std, label='Rgr')
+
+                    # Annotate with asterisk if p < 0.05
+                    for i in range(len(clf_x)):
+                        if ttest_p[i] < 0.05:
+                            ax.annotate("*", xy=(clf_x[i], clf_ave.iloc[i] + clf_std.iloc[i]), xycoords='data', size =12)
+                    
+                    # Set labels and show figure
+                    ax.set_xlabel('X')
+                    ax.set_ylabel('y')
+                    plt.legend()
+                    plt.xlabel('Percentile')
+                    plt.ylabel(key)
+                    plt.title(search_dict['Algorithm'] + ' ' + str(df_clf['Noise Level'].iloc[0]))
+
+                    # Define directory path for PNG file from PKL file path
+                    if not png_path:
+                        pngparent = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PNG'
+                    else:
+                        pngparent = png_path
+                    dataset = str(df_clf['name'].iloc[0])
+                    testset = str(df_clf['test_set'].iloc[0])
+                    splitting = str(df_clf['splitting'].iloc[0])
+                    sample_size = str(df_clf['sample_size'].iloc[0])
+                    noise = str(df_clf['Noise Level'].iloc[0])
+                    pngfoldpath = os.path.join(pngparent, dataset, testset, splitting, sample_size, noise)
+
+                    # Make directory paths if they don't exist
+                    if not os.path.exists(pngfoldpath):
+                        os.makedirs(pngfoldpath)
+
+                    # Define filename
+                    pngfilename = '{}_{}_{}_{}_{}_{}_{}_{}.png'.format(dataset,
+                                                                    testset,
+                                                                    splitting,
+                                                                    sample_size,
+                                                                    noise,
+                                                                    df_clf['k_folds'].iloc[0],
+                                                                    df_clf['Score Name'].iloc[0],
+                                                                    search_dict['Algorithm'])
+
+                    # Save figure as PNG
+                    plt.savefig(os.path.join(pngfoldpath, pngfilename))
+                    plt.close()
+        return None
+
+#################################
+# SSH METHODS
+#################################
 
     def load_scores_SSH(self, remote_path, k_fold):
         """ Loads scores from a remote path using SSH.
@@ -237,97 +403,6 @@ class scoreSheet():
         sftp_client.close()
         ssh.close()
 
-        return None
-        
-    def plot_scores(self, search_dict = None, png_path = None):
-        """ Plots scores. """
-
-        # Load dataframes as function variables for manipulation, leaving class variables unaffected
-        for key in vars(self).keys():
-            df_clf = self.__getattribute__(str(key))['clf']
-            df_rgr = self.__getattribute__(str(key))['rgr']
-
-            # Require that the search_dict have at least a filter for algorithm
-            if not search_dict:
-                print("User must provide at least a filter for algorithm in search_dict via 'Algorithm': value")
-                return
-
-            elif 'Algorithm' not in search_dict.keys():
-                print("User must provide at least a filter for algorithm in search_dict via 'Algorithm': value")
-                return
-
-            else:
-
-                # Apply each filter in search_dict keys
-                for search_key in search_dict.keys():
-                    df_clf = df_clf[df_clf[search_key] == search_dict[search_key]]
-                    df_rgr = df_rgr[df_rgr[search_key] == search_dict[search_key]]
-
-                # Print error statement if filter results in empty df
-                if df_clf.empty:
-                    print('Filtering has produced an empty classifier dataframe.')
-
-                elif df_rgr.empty:
-                    print('Filtering has produced an empty regressor dataframe.')
-
-                else:
-                    
-                    # Calculate averages, std, and ttest
-                    clf_x = df_clf.groupby(['Percentile']).mean().index
-                    clf_ave = df_clf.groupby(['Percentile']).mean()['score']
-                    clf_std = df_clf.groupby(['Percentile']).std()['score']
-                    rgr_x = df_rgr.groupby(['Percentile']).mean().index
-                    rgr_ave = df_rgr.groupby(['Percentile']).mean()['score']
-                    rgr_std = df_rgr.groupby(['Percentile']).std()['score']
-                    ttest_stat, ttest_p = ttest_ind_from_stats(mean1=clf_ave, std1=clf_std, nobs1=len(clf_x), mean2=rgr_ave, std2=rgr_std, nobs2=len(rgr_x))
-
-                    # Make figure with annotations
-                    fig, ax = plt.subplots(1,1)
-                    plt.errorbar(x=clf_x, y=clf_ave, yerr=clf_std, label='Clf')
-                    plt.errorbar(x=rgr_x, y=rgr_ave, yerr=rgr_std, label='Rgr')
-
-                    # Annotate with asterisk if p < 0.05
-                    for i in range(len(clf_x)):
-                        if ttest_p[i] < 0.05:
-                            ax.annotate("*", xy=(clf_x[i], clf_ave.iloc[i] + clf_std.iloc[i]), xycoords='data', size =12)
-                    
-                    # Set labels and show figure
-                    ax.set_xlabel('X')
-                    ax.set_ylabel('y')
-                    plt.legend()
-                    plt.xlabel('Percentile')
-                    plt.ylabel(key)
-                    plt.title(search_dict['Algorithm'] + ' ' + str(df_clf['Noise Level'].iloc[0]))
-
-                    # Define directory path for PNG file from PKL file path
-                    if not png_path:
-                        pngparent = r'C:\Users\skolmar\PycharmProjects\Dichotomization\PNG'
-                    else:
-                        pngparent = png_path
-                    dataset = str(df_clf['name'].iloc[0])
-                    testset = str(df_clf['test_set'].iloc[0])
-                    splitting = str(df_clf['splitting'].iloc[0])
-                    sample_size = str(df_clf['sample_size'].iloc[0])
-                    noise = str(df_clf['Noise Level'].iloc[0])
-                    pngfoldpath = os.path.join(pngparent, dataset, testset, splitting, sample_size, noise)
-
-                    # Make directory paths if they don't exist
-                    if not os.path.exists(pngfoldpath):
-                        os.makedirs(pngfoldpath)
-
-                    # Define filename
-                    pngfilename = '{}_{}_{}_{}_{}_{}_{}_{}.png'.format(dataset,
-                                                                    testset,
-                                                                    splitting,
-                                                                    sample_size,
-                                                                    noise,
-                                                                    df_clf['k_folds'].iloc[0],
-                                                                    df_clf['Score Name'].iloc[0],
-                                                                    search_dict['Algorithm'])
-
-                    # Save figure as PNG
-                    plt.savefig(os.path.join(pngfoldpath, pngfilename))
-                    plt.close()
         return None
 
 

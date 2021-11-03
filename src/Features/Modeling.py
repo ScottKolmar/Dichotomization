@@ -23,6 +23,16 @@ from sklearn.metrics import cohen_kappa_score
 from sklearn.metrics import matthews_corrcoef
 from sklearn.linear_model import LogisticRegression
 
+# Import Tensorflow
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow import metrics
+from tensorflow.keras import layers, metrics, losses, optimizers
+import keras_tuner as kt
+import tensorflow_addons as tfa
+import tensorflow_probability as tfp
+from tensorflow_probability import stats
+
 # Import Functions
 from Features.Algorithms import *
 
@@ -64,7 +74,7 @@ class DataSet():
         self.df = pd.read_csv(filepath_or_buffer=self.csv, index_col=0)
 
         # Set name variable
-        self.name = self.csv.split('.')[0].split('_')[0].split('\\')[6]
+        self.name = self.csv.split('\\')[-1].split('.')[0].split('_')[0]
 
         # Set sample size class variable to the number of rows if None
         if sample_size is None:
@@ -107,7 +117,7 @@ class DataSet():
 
         # Tups variable is a list, each member corresponds to a set of algorithms optimized
         # on the respective training set, in the same order
-        self.tups = []
+        self.tups = None
         
         # Set preprocessing variables to false
         self.var_filter_ = {'filtered': False, 'Value': None}
@@ -177,24 +187,6 @@ class DataSet():
         self.splitting = None
     
         return None
-    
-    # DEPRECATED
-    def select_random_features(self, num_features):
-        """
-
-        Selects a random number of feature variables.
-        """
-
-        # Select features
-        feature = random_x(self.df, num_features)
-
-        # Reassign dataset variables
-        self.X = self.df.loc[:, feature]
-        self.num_features = len(self.X.columns)
-        self.features = self.X.columns
-        self.random_features_ = {'filtered': True, 'Value': num_features}
-
-        return None
 
     def make_meta_func(self):
         """
@@ -217,14 +209,17 @@ class DataSet():
         # Convert each estimator within self.tups into a dictionary of parameters to save space
         new_meta = {}
         new_meta['tups'] = []
-        for tup in meta_dict['tups']:
-            tup_params = [[x[0].get_params(deep=True), x[1].get_params(deep=True), x[2]] for x in tup]
-            new_meta['tups'].append(tup_params)
+        for alg_tup in meta_dict['tups']:
+            clf = alg_tup[0]
+            rgr = alg_tup[1]
+            alg_name = alg_tup[2]
+            params_tuple = (clf.get_params(deep=True), rgr.get_params(deep=True), alg_name)
+            new_meta['tups'].append(params_tuple)
         meta_dict['tups'] = new_meta['tups']
 
         return meta_dict
 
-    def generate_data(self, test_set = 'True', use_ssh = False):
+    def generate_data(self, test_set = 'True', optimize_on = ['Continuous', 'Categorical']):
         """
         Loops through each y column stored in y_dict (generated from sampleNoise()), generates 9
         binary splits on percentiles 10 through 90, and trains a classifier/regressor pair on each fold. Takes the average BA score for each fold
@@ -256,78 +251,76 @@ class DataSet():
             sigma = y_dict[lvl_dict]['sigma']
             noise_level = str(lvl_dict)
 
+            # Define thresholds for looping
+            threshes = [np.percentile(y, x) for x in [10, 20, 30, 40, 50, 60, 70, 80, 90]]
+            threshtup = list(zip(threshes, [10, 20, 30, 40, 50, 60, 70, 80, 90]))
+
             # Loop through each algorithm classifier/regressor pair
             for alg_tup in self.tups:
-                for clf, rgr, alg_name in alg_tup:
+                
+                # Set clf, rgr, and alg_name
+                clf = alg_tup[0]
+                rgr = alg_tup[1]
+                alg_name = alg_tup[2]
+
+                # Define meta dictionary from dataset attributes
+                meta = self.make_meta_func()
+
+                # Fill in meta dictionary from loop specific variables
+                meta['Thresholds'] = threshtup
+                meta['Algorithm'] = alg_name
+                meta['Noise Level'] = noise_level
+                meta['Sigma'] = sigma
+                meta['Estimator'] = alg_tup
+                meta['training_set_params'] = []
+
+                # Create list which contains scores for each training set
+                alg_score_list = []
+
+                # Loop through training sets
+                for i, training_set in enumerate(self.training_sets['X_train']):
+                    X_train = self.training_sets['X_train'][i]
+                    y_train = self.training_sets['y_train'][i]
+                    X_test = self.testing_sets['X_test'][i]
+                    y_test = self.testing_sets['y_test'][i]
+
+                    print(f'TRAINING FOLD {i} $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$')
+
+                    # Optimize algorithm if needed
+                    if optimize_on:
+                        self.optimize_alg(tup = alg_tup, X = X_train, y = y_train, meta_dict = meta, optimize_on = optimize_on)
+                    else:
+                        meta['training_set_params'].append(rgr.get_params(deep=True))
+
+                    # Create list of score dicts which contains scores for all thresholds
+                    fold_score_dict_list = []
 
                     # Loop through thresholds
-                    threshes = [np.percentile(y, x) for x in [10, 20, 30, 40, 50, 60, 70, 80, 90]]
-                    threshtup = list(zip(threshes, [10, 20, 30, 40, 50, 60, 70, 80, 90]))
                     for thresh, perc in threshtup:
 
-                        # Define estimator tuple
-                        estimator = [clf, rgr, alg_name]
+                        # Print statement
+                        print(f'{perc} Percentile ###################################')
 
-                        # Define meta dictionary from dataset attributes
-                        meta = self.make_meta_func()
+                        # Get score for single fold and single threshold
+                        thresh_score_dict = get_clf_rgr_scores_test_set(thresh=thresh, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, clf = clf, rgr = rgr)
+                        fold_score_dict_list.append(thresh_score_dict)
 
-                        # Fill in meta dictionary from loop specific variables
-                        meta['Threshold'] = thresh
-                        meta['Percentile'] = perc
-                        meta['Algorithm'] = alg_name
-                        meta['Noise Level'] = noise_level
-                        meta['Sigma'] = sigma
-                        meta['Estimator'] = estimator
+                        # Print statement
+                        print(thresh_score_dict)
+                        print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~')
+                    
+                    # Append the list of threshold scores for entire fold to alg score list
+                    alg_score_list.append(fold_score_dict_list)
 
-                        # Create the list of score dictionaries
-                        score_dict_list = []
+                # Save accumulated score dictionary
+                print('Saving ###################################################################')
+                save_pkl(score_dict = alg_score_list, meta = meta, pkl_path = self.parent_path)
 
-                        # Loop through each training set
-                        for i, training_set in enumerate(self.training_sets['X_train']):
-                            X_train = self.training_sets['X_train'][i]
-                            y_train = self.training_sets['y_train'][i]
-                            X_test = self.testing_sets['X_test'][i]
-                            y_test = self.testing_sets['y_test'][i]
+        return None
+    
+    def generate_dnn_data(self):
+        """ Generates data using an optimized DNN."""
 
-                            # # Make algorithms
-                            # if optimize_on:
-                            #     self.make_opt_algs(X = X_train, y = y_train, optimize_on = optimize_on)
-                            # else:
-                            #     self.make_algs()
-
-                            # Get score for single fold
-                            score_dict = get_clf_rgr_scores_test_set(thresh=thresh, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, clf = clf, rgr = rgr)
-                            score_dict_list.append(score_dict)
-                        
-                        # Accumulate scores
-                        accumulated_scores = accumulate_scores(score_dict_list)
-
-                        # Save by SSH or locally
-                        if use_ssh:
-
-                            # Save accumulated score dictionary
-                            print('Saving to Server via SSH')
-                            save_pkl_ssh(score_dict = accumulated_scores, meta = meta, pkl_path = self.parent_path)
-
-                            # Print statements
-                            print(f'Dataset: {dataset_name}\n Noise Level: {noise_level}\n Split: {perc}\n Variables: {num_features}\n')
-                            for key in accumulated_scores.keys():
-                                print(f"{meta['Algorithm']} Classifier {key}: {np.average(accumulated_scores[key]['Clfs'])} +/- {np.std(accumulated_scores[key]['Clfs'])}")                                   
-                                print(f"{meta['Algorithm']} Regressor {key}: {np.average(accumulated_scores[key]['Rgrs'])} +/- {np.std(accumulated_scores[key]['Rgrs'])}")                                            
-                                print('\n')
-                        
-                        elif use_ssh is False:
-
-                            # Save accumulated score dictionary
-                            print('Saving Locally')
-                            save_pkl(score_dict = accumulated_scores, meta = meta, pkl_path = self.parent_path)
-
-                            # Print statements
-                            print(f'Dataset: {dataset_name}\n Noise Level: {noise_level}\n Split: {perc}\n Variables: {num_features}\n')
-                            for key in accumulated_scores.keys():
-                                print(f"{meta['Algorithm']} Classifier {key}: {np.average(accumulated_scores[key]['Clfs'])} +/- {np.std(accumulated_scores[key]['Clfs'])}")                                   
-                                print(f"{meta['Algorithm']} Regressor {key}: {np.average(accumulated_scores[key]['Rgrs'])} +/- {np.std(accumulated_scores[key]['Rgrs'])}")                                            
-                                print('\n')
 
         return None
 #---------------------
@@ -495,12 +488,13 @@ class DataSet():
 
         # Reinstantiate as new tuple and add to list
         names = ['KNN', 'DT', 'SVM', 'RF']
-        tups = list(zip(clf_list, rgr_list, names))
+        tups = zip(clf_list, rgr_list, names)
 
-        self.tups.append(tups)
+        self.tups = list(tups)
 
         return None
     
+    # DEPRECATED
     def make_opt_algs(self, X, y, optimize_on = ['Continuous', 'Categorical']):
         """
 
@@ -605,7 +599,91 @@ class DataSet():
         # Append to class variable
         self.tups.append(tups)
 
+        return None
+    
+    def optimize_alg(self, tup, X, y, meta_dict, optimize_on = ['Continuous', 'Categorical']):
+        """ Optimizes an algorithm. """
 
+        # Assign clf and rgr
+        clf = tup[0]
+        rgr = tup[1]
+        alg_name = tup[2]
+
+        # Check which algorithm to assign optimization dictionary
+        if alg_name == 'KNN':
+            opt_dict = {
+            'n_neighbors': np.arange(2, 22, 1)
+            }
+        
+        elif alg_name == 'DT':
+            opt_dict = {
+            'max_depth': [50, 100, 200, 500],
+            'min_samples_split': [2, 5, 10, 20, 40],
+            'min_samples_leaf': [1, 5, 10, 20]
+            }
+        
+        elif alg_name == 'SVM':
+            opt_dict = {
+            'kernel': ['sigmoid', 'rbf'],
+            'C': [0.001, 0.01, 0.1, 1, 10]
+            }
+
+        elif alg_name == 'RF':
+            opt_dict = {
+            'n_estimators': [10, 25, 50, 100, 150, 200],
+            'max_depth': [50, 100, 200, 500],
+            'min_samples_split': [2, 5, 10, 20, 40],
+            'min_samples_leaf': [1, 5, 10, 20]
+            }
+
+        if optimize_on == 'Continuous':
+            
+            # Make rgr GridSearch
+            search = GridSearchCV(estimator = rgr, param_grid = opt_dict, n_jobs = -1, verbose= 5)
+
+            # Set dataset variable
+            self.optimized_on_ = 'Continuous'
+
+        elif optimize_on == 'Categorical':
+
+            # Set scoring function as multiple metrics
+            scoring = ['balanced_accuracy', 'f1', 'roc_auc', 'neg_brier_score']
+
+            # Make clf GridSearch
+            search = GridSearchCV(estimator = clf, param_grid = opt_dict, n_jobs = -1, verbose= 5, scoring= scoring, refit = 'f1')
+
+            # Set y to be categorical
+            # Vectorize binning function
+            twobin_v = np.vectorize(two_binner)
+            thresh = np.median(self.y_true)
+            y = twobin_v(y, thresh = thresh)
+
+            # Set dataset variable
+            self.optimized_on_ = f'Categorical: {thresh}'
+
+            # Set meta dictionary value
+            meta_dict['optimized_on'] = self.optimized_on_
+
+        # Fit the gridsearch
+        search.fit(X, y)
+        opt_params = search.best_params_
+
+        # Set the parameters of the regressor
+        rgr.set_params(**opt_params)
+
+        # Set the parameters of the classifier
+        clf.set_params(**opt_params)
+
+        # Add the current params to a meta_dict key corresponding to the correct training set
+        meta_dict['training_set_params'].append(rgr.get_params(deep=True))
+
+        return None
+    
+    def make_dnn(self, X_train, optimize_on = ['Continuous', 'Categorical']):
+        """ Makes a DNN regressor classifier pair. """
+        
+        
+        
         return None
 
 #----------------------------
@@ -724,7 +802,11 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, r
     y_test_class = pd.DataFrame(twobin_v(y_test, thresh=thresh), index=y_test.index)
 
     # Fit Clf
-    clf.fit(X_train, y_train_class_vals)
+    if type(clf) == 'keras.engine.sequential.Sequential':
+        class_history = clf.fit(X_train, y_train, validation_split=0.2, verbose=0, epochs=200)
+
+    else:
+        clf.fit(X_train, y_train_class_vals)
 
     # Classifier probabilistic scores
     y_prob_clf = clf.predict_proba(X_test)
@@ -820,12 +902,10 @@ def save_pkl(score_dict = None, meta = None, pkl_path = None):
 
     # Define meta variables
     dataset = meta['name']
-    testset = meta['test_set']
     splitting = meta['splitting']
+    kfolds = meta['k_folds']
     sample_size = meta['sample_size']
     noise_level = meta['Noise Level']
-    perc = meta['Percentile']
-    kfolds = meta['k_folds']
     name = meta['Algorithm']
 
     # Define object to be saved to PKL
@@ -833,7 +913,7 @@ def save_pkl(score_dict = None, meta = None, pkl_path = None):
 
     # Save PKL file
     uniq_tag = str(datetime.datetime.now().date()) + '_' + str(datetime.datetime.now().time()).replace(':', '.')
-    pklfilename = f'{dataset}_{testset}_{splitting}_{sample_size}_{noise_level}_{perc}_{kfolds}_{name}_{uniq_tag}.pkl'                            
+    pklfilename = f'{dataset}_{splitting}_kfolds_{kfolds}_{sample_size}_{noise_level}_{name}_{uniq_tag}.pkl'                            
     pklfile = os.path.join(pkl_path, pklfilename)
     with open(pklfile, 'wb') as f:
         pickle.dump(pkl_data, f)
@@ -886,3 +966,95 @@ def save_pkl_ssh(score_dict = None, meta = None, pkl_path = None):
     ssh.close()
 
     return None
+
+def reg_model_builder(hp, X_train):
+    """ Builds and compiles a regressor DNN model"""
+    
+    # Initialize normalizer and adapt to X_train
+    normalizer = layers.Normalization(axis=-1)
+    normalizer.adapt(np.array(X_train))
+
+    # Add normalizer to model
+    model = keras.Sequential([normalizer])
+
+    # Define unit optimization
+    hp_units = hp.Int('units', min_value=32, max_value=512, step=64)
+
+    # Define layer optimization
+    for i in range(hp.Int('n_layers', 2, 8)):
+        model.add(
+            layers.Dense(
+            units=hp_units,
+            kernel_regularizer='l2',
+            activation='relu'
+            )
+        )
+        model.add(
+            layers.Dropout(0.5)
+        )
+    
+    # Define output layer
+    model.add(layers.Dense(1))
+
+    # Define learning rate optimization
+    hp_learning_rate = hp.Choice('learning_rate', values=[0.001, 0.0001, 0.00001])
+
+    # Compile model
+    model.compile(
+        optimizer=optimizers.Adagrad(learning_rate=hp_learning_rate),
+        loss='root_mean_squared_error',
+        metrics=[tfa.metrics.RSquare(y_shape=(1,))]
+        )
+
+    return model
+        
+def class_model_builder(hp, X_train, output_bias):
+    """ Builds and compiles a classification DNN model"""
+
+    # Initialize normalizer and adapt to X_train
+    normalizer = layers.Normalization(axis=-1)
+    normalizer.adapt(np.array(X_train))
+    
+    # Transform output bias
+    if output_bias is not None:
+        output_bias = tf.keras.initializers.Constant(output_bias)
+    
+    # Define unit optimization
+    hp_units = hp.Int('units', min_value=32, max_value=512, step=64)
+
+    model = keras.Sequential([normalizer])
+
+    # Define layer optimizations
+    for i in range(hp.Int('n_layers', 2, 8)):
+        model.add(
+            layers.Dense(
+            units=hp_units,
+            kernel_regularizer='l2',
+            activation='relu'
+            )
+        )
+        model.add(
+            layers.Dropout(0.5)
+        )
+    
+    # Define output layer
+    model.add(
+        layers.Dense(1, activation='sigmoid', bias_initializer=output_bias)
+    )
+
+    # Define learning rate optimization
+    hp_learning_rate = hp.Choice('learning_rate', values=[0.001, 0.0001, 0.00001])
+
+    # Compile model
+    model.compile(
+        loss=losses.BinaryCrossentropy(),
+        optimizer=optimizers.Adam(learning_rate=hp_learning_rate),
+        metrics=[
+            metrics.BinaryAccuracy(name='binary_accuracy'),
+            tfa.metrics.F1Score(name='f1_score'),
+            tfa.metrics.CohenKappa(name='cohen_kappa'),
+            tfa.metrics.MatthewsCorrelationCoefficient(name='matthews'),
+            metrics.AUC(name='AUC'),
+            ]
+        )
+    return model
