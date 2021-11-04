@@ -213,7 +213,12 @@ class DataSet():
             clf = alg_tup[0]
             rgr = alg_tup[1]
             alg_name = alg_tup[2]
-            params_tuple = (clf.get_params(deep=True), rgr.get_params(deep=True), alg_name)
+
+            if alg_tup[-1] == 'DNN':
+                params_tuple = (clf.get_config(), rgr.get_config(), alg_name)
+            else:
+                params_tuple = (clf.get_params(deep=True), rgr.get_params(deep=True), alg_name)
+
             new_meta['tups'].append(params_tuple)
         meta_dict['tups'] = new_meta['tups']
 
@@ -308,7 +313,7 @@ class DataSet():
                         print(f'{perc} Percentile ###################################')
 
                         # Get score for single fold and single threshold
-                        thresh_score_dict = get_clf_rgr_scores_test_set(thresh=thresh, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, clf = clf, rgr = rgr)
+                        thresh_score_dict = get_clf_rgr_scores_test_set(thresh=thresh, X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test, tup=alg_tup)
                         fold_score_dict_list.append(thresh_score_dict)
 
                         # Print statement
@@ -599,15 +604,13 @@ class DataSet():
                 class_dnn_model_builder,
                 objective='val_loss',
                 overwrite=True,
-                max_trials=45,
+                max_trials=75,
                 directory=self.dnn_directories['clf_directory']
                 )
             tuner.search(X_train, y_class, epochs=75, validation_split=0.2, class_weight=class_weight)
             best_hps = tuner.get_best_hyperparameters()[0]
 
-            print('DNN CLASSIFICATION MODEL HYPERPARAMETERS:')
-            print(best_hps)
-            print(tuner.get_best_models()[0].summary())
+            print('DNN CLASSIFICATION MODEL HYPERPARAMETERS OPTIMIZED')
 
             # Set hyperparameters of clf
             optimized_clf_model = class_dnn_model_builder(best_hps, output_bias=output_bias)
@@ -646,15 +649,13 @@ class DataSet():
                 reg_dnn_model_builder,
                 objective='val_loss',
                 overwrite=True,
-                max_trials=45,
+                max_trials=75,
                 directory=self.dnn_directories['rgr_directory']
                 )
             tuner.search(X_train, y_train, epochs=75, validation_split=0.2)
             best_hps = tuner.get_best_hyperparameters()[0]
 
-            print('DNN REGRESSION MODEL HYPERPARAMETERS:')
-            print(best_hps)
-            print(tuner.get_best_models()[0].summary())
+            print('DNN REGRESSION MODEL HYPERPARAMETERS OPTIMIZED')
 
             # Set hyperparameters of rgr
             optimized_rgr_model = reg_dnn_model_builder(best_hps)
@@ -801,7 +802,7 @@ def sample_noise(y = None, base_sigma = None, num_levels = 10, scaling_factor = 
 
     return end_dict
 
-def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, rgr):
+def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, tup):
     """
     Takes a meta-dictionary, training and test set. Fits a classifier and gets a classifier score. Fits a regressor, predicts, converts predictions
     to classes based on threshold, and gets score on those classes. All for a single algorithm (clf/rgr pair).
@@ -814,6 +815,10 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, r
     Returns:
          BA (list): List of meta dictionary, classifier score dictionary, and regressor score dictionary.
     """
+    # Unpack tup
+    clf = tup[0]
+    rgr = tup[1]
+    alg_name = tup[2]
 
     # Vectorize binning function
     twobin_v = np.vectorize(two_binner)
@@ -824,7 +829,7 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, r
     y_test_class = pd.DataFrame(twobin_v(y_test, thresh=thresh), index=y_test.index)
 
     # Fit Clf if DNN
-    if type(clf) == 'keras.engine.sequential.Sequential':
+    if alg_name == 'DNN':
 
         # Calculate class weights again
         num_pos = y_train.sum()
@@ -860,7 +865,7 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, clf, r
     log = LogisticRegression(max_iter= 1000, solver = 'liblinear')
 
     # Fit with DNN
-    if type(rgr) == 'keras.engine.sequential.Sequential':
+    if alg_name == 'DNN':
         rgr.fit(X_train, y_train.values.ravel(), validation_split=0.2, verbose=0, epochs=45)
         y_pred_rgr = rgr.predict(X_test).flatten()
         y_pred_rgr_class = twobin_v(y_pred_rgr, thresh=thresh)
@@ -1056,7 +1061,7 @@ def reg_dnn_model_builder(hp):
     # Compile model
     model.compile(
         optimizer=optimizers.Adagrad(learning_rate=hp_learning_rate),
-        loss='root_mean_squared_error',
+        loss=losses.MeanSquaredError(),
         metrics=[metrics.RootMeanSquaredError(), tfa.metrics.RSquare(y_shape=(1,))]
         )
 
