@@ -9,6 +9,7 @@ import datetime
 import paramiko
 from dotenv import load_dotenv
 import copy
+import shutil
 
 # Import sklearn
 from scipy.stats.stats import pearsonr, spearmanr, ttest_ind
@@ -276,7 +277,6 @@ class DataSet():
                 meta['Algorithm'] = alg_name
                 meta['Noise Level'] = noise_level
                 meta['Sigma'] = sigma
-                meta['Estimator'] = alg_tup
                 meta['training_set_params'] = []
 
                 # Create list which contains scores for each training set
@@ -599,13 +599,18 @@ class DataSet():
             output_bias = np.log(num_pos/num_neg)
             class_weight = {0: (1/num_neg) * (num_total/2), 1: (1/num_pos) * (num_total/2)}
 
+            # Make new directory for tuner
+            uniq_tag = str(datetime.datetime.now().date()) + '_' + str(datetime.datetime.now().time()).replace(':', '.')
+            tuner_dir = self.dnn_directories['clf_directory']
+            
             # Optimize with tuner
             tuner = kt.BayesianOptimization(
                 class_dnn_model_builder,
                 objective='val_loss',
                 overwrite=True,
-                max_trials=75,
-                directory=self.dnn_directories['clf_directory']
+                max_trials=50,
+                directory=tuner_dir,
+                project_name=uniq_tag
                 )
             tuner.search(X_train, y_class, epochs=75, validation_split=0.2, class_weight=class_weight)
             best_hps = tuner.get_best_hyperparameters()[0]
@@ -621,9 +626,6 @@ class DataSet():
                 optimizer=optimizers.Adagrad().from_config(optimized_clf_model.optimizer.get_config()),
                 metrics=[
                     metrics.BinaryAccuracy(name='binary_accuracy'),
-                    tfa.metrics.F1Score(name='f1_score', num_classes = 2),
-                    tfa.metrics.CohenKappa(name='cohen_kappa', num_classes = 2),
-                    tfa.metrics.MatthewsCorrelationCoefficient(name='matthews', num_classes = 2),
                     metrics.AUC(name='AUC')
                     ]
                 )
@@ -639,18 +641,26 @@ class DataSet():
                 tfa.metrics.RSquare(y_shape=(1,))]
                 )
 
+            # Remove temp tuner dir
+            shutil.rmtree(os.path.join(tuner_dir, uniq_tag))
+
         elif optimize_on == 'Continuous':
             
             # Set class variable
             self.optimized_on = 'Continuous'
+
+            # Make new directory for tuner
+            uniq_tag = str(datetime.datetime.now().date()) + '_' + str(datetime.datetime.now().time()).replace(':', '.')
+            tuner_dir = self.dnn_directories['rgr_directory']
 
             # Optimize with tuner
             tuner = kt.BayesianOptimization(
                 reg_dnn_model_builder,
                 objective='val_loss',
                 overwrite=True,
-                max_trials=75,
-                directory=self.dnn_directories['rgr_directory']
+                max_trials=50,
+                directory=tuner_dir,
+                project_name=uniq_tag
                 )
             tuner.search(X_train, y_train, epochs=75, validation_split=0.2)
             best_hps = tuner.get_best_hyperparameters()[0]
@@ -677,16 +687,16 @@ class DataSet():
                 optimizer=optimizers.Adagrad().from_config(dnn_rgr_model.optimizer.get_config()),
                 metrics=[
                     metrics.BinaryAccuracy(name='binary_accuracy'),
-                    tfa.metrics.F1Score(name='f1_score', num_classes = 2),
-                    tfa.metrics.CohenKappa(name='cohen_kappa', num_classes = 2),
-                    tfa.metrics.MatthewsCorrelationCoefficient(name='matthews', num_classes = 2),
                     metrics.AUC(name='AUC')
                     ]
                 )
 
+            # Remove temp tuner dir
+            shutil.rmtree(os.path.join(tuner_dir, uniq_tag))
+
         return None
     
-    def make_dnns(self):
+    def make_dnns(self, **kwargs):
         """ Makes DNN rgr/clf pair and adds to tups attribute."""
 
         # Define dnn_tuner directories
@@ -695,10 +705,10 @@ class DataSet():
         self.dnn_directories['rgr_directory'] = r'C:\Users\skolmar\PycharmProjects\Modeling\Dichotomization\DNN_Tuner_tmp\Rgr_tmp'
 
         # Instantiate Classifier
-        dnn_clf = class_dnn_model_builder(hp=None, output_bias = None)
+        dnn_clf = class_dnn_model_builder(**kwargs, output_bias=None)
 
         # Instantiate Regressor
-        dnn_rgr = reg_dnn_model_builder(hp=None)
+        dnn_rgr = reg_dnn_model_builder(**kwargs)
 
         # Instantiate Name
         dnn_name = 'DNN'
@@ -828,17 +838,24 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, tup):
     y_train_class_vals = y_train_class.iloc[:].values.ravel()
     y_test_class = pd.DataFrame(twobin_v(y_test, thresh=thresh), index=y_test.index)
 
+    # Calculate class weights again, to be used only with DNN
+    num_pos = y_train_class.sum()
+    num_neg = len(y_train_class) - num_pos
+    num_total = len(y_train_class)
+    class_weight = {0: (1/num_neg) * (num_total/2.0), 1: (1/num_pos) * (num_total/2.0)}
+
     # Fit Clf if DNN
     if alg_name == 'DNN':
 
-        # Calculate class weights again
-        num_pos = y_train.sum()
-        num_neg = len(y_train_class) - num_pos
-        num_total = len(y_train_class)
-        class_weight = {0: (1/num_neg) * (num_total/2.0), 1: (1/num_pos) * (num_total/2.0)}
+        # Set output_bias for clf
+        output_bias = np.log(num_pos/num_neg)
+        output_layer = clf.layers[-1]
+        config_dict = output_layer.get_config().copy()
+        config_dict['bias_initializer'] = tf.keras.initializers.Constant(output_bias)
+        output_layer = output_layer.from_config(config_dict)
 
         # Fit DNN
-        clf.fit(X_train, y_train_class_vals, validation_split=0.2, verbose=0, epochs=45, class_weight=class_weight)
+        clf.fit(X_train, y_train_class_vals, validation_split=0.2, verbose=0, epochs=75, class_weight=class_weight)
 
         # DNN output is probabilistic, so convert to binary predictions manually
         y_prob_clf = clf.predict(X_test).flatten()
@@ -859,14 +876,23 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, tup):
     BA_score_clf = balanced_accuracy_score(y_test_class, y_pred_clf)
     F1_score_clf = f1_score(y_test_class, y_pred_clf)
     kappa_score_clf = cohen_kappa_score(y_test_class, y_pred_clf)
-    pearsphi_score_clf = matthews_corrcoef(y_test_class, y_pred_clf)
+
+    try:
+        pearsphi_score_clf = matthews_corrcoef(y_test_class, y_pred_clf)
+    except RuntimeWarning:
+        print('Cannot calculate clf pearsphi.')
+        print('*******************************')
+        pearsphi_score_rgr = np.nan
+
 
     # Define logistic regressor to get probabilistic scores
-    log = LogisticRegression(max_iter= 1000, solver = 'liblinear')
+    if alg_name != 'DNN':
+        class_weight = None
+    log = LogisticRegression(max_iter= 1000, solver = 'liblinear', class_weight=class_weight)
 
     # Fit with DNN
     if alg_name == 'DNN':
-        rgr.fit(X_train, y_train.values.ravel(), validation_split=0.2, verbose=0, epochs=45)
+        rgr.fit(X_train, y_train.values.ravel(), validation_split=0.2, verbose=0, epochs=75)
         y_pred_rgr = rgr.predict(X_test).flatten()
         y_pred_rgr_class = twobin_v(y_pred_rgr, thresh=thresh)
     
@@ -901,7 +927,13 @@ def get_clf_rgr_scores_test_set(thresh, X_train, X_test, y_train, y_test, tup):
     BA_score_rgr = balanced_accuracy_score(y_test_class, y_pred_rgr_class)
     F1_score_rgr = f1_score(y_test_class, y_pred_rgr_class)
     kappa_score_rgr = cohen_kappa_score(y_test_class, y_pred_rgr_class)
-    pearsphi_score_rgr = matthews_corrcoef(y_test_class, y_pred_rgr_class)
+
+    try:
+        pearsphi_score_rgr = matthews_corrcoef(y_test_class, y_pred_rgr_class)
+    except RuntimeWarning:
+        print('Cannot calculate rgr pearsphi.')
+        print('******************************')
+        pearsphi_score_rgr = np.nan
 
     score_dict = {
     'BA': {'Clfs': BA_score_clf, 'Rgrs': BA_score_rgr},
@@ -1019,109 +1051,103 @@ def save_pkl_ssh(score_dict = None, meta = None, pkl_path = None):
 # DNN MODEL BUILDERS
 ###############################
 
-def reg_dnn_model_builder(hp):
+def reg_dnn_model_builder(n_units = [32], n_hidden_layers = 1, activation = 'relu', kernel_regularizer = 'l2', learning_rate = 0.001):
     """ Builds and compiles a regressor DNN model"""
+
+    # Check unit and layer requirements
+    if len(n_units) > 1 and len(n_units) != (n_hidden_layers + 1):
+        return print('[N_units] and n_layers must be equal unless [n_units] is 1 (all layers have same n_units).')
 
     # Define sequential model
     model = keras.Sequential()
-
-    # Define unit optimization
-    if hp is not None:
-        hp_units = hp.Int('units', min_value=32, max_value=512, step=64)
-    else:
-        hp_units = 32
-
-    # Define layer optimization
-    if hp is not None:
-        hp_layers = hp.Int('n_layers', 2, 8)
-    else:
-        hp_layers = 5
     
-    for i in range(hp_layers):
-        model.add(
-            layers.Dense(
-            units=hp_units,
-            kernel_regularizer='l2',
-            activation='relu'
+    # Loop through layers for single number of units
+    if len(n_units) == 1:
+        for i in range(n_hidden_layers + 1):
+            model.add(
+                layers.Dense(
+                    units=n_units[0],
+                    kernel_regularizer=kernel_regularizer,
+                    activation=activation
+                )
             )
-        )
-        model.add(
-            layers.Dropout(0.5)
-        )
+    
+    # For variable number of units
+    else:
+        for i in range(n_hidden_layers + 1):
+            model.add(
+                layers.Dense(
+                    units=n_units[i],
+                    kernel_regularizer=kernel_regularizer,
+                    activation=activation
+                )
+            )
+
+    # Add dropout
+    model.add(layers.Dropout(0.5))
     
     # Define output layer
     model.add(layers.Dense(1))
 
-    # Define learning rate optimization
-    if hp is not None:
-        hp_learning_rate = hp.Choice('learning_rate', values=[0.001, 0.0001, 0.00001])
-    else:
-        hp_learning_rate = 0.001
-
     # Compile model
     model.compile(
-        optimizer=optimizers.Adagrad(learning_rate=hp_learning_rate),
+        optimizer=optimizers.Adagrad(learning_rate=learning_rate),
         loss=losses.MeanSquaredError(),
         metrics=[metrics.RootMeanSquaredError(), tfa.metrics.RSquare(y_shape=(1,))]
         )
 
     return model
         
-def class_dnn_model_builder(hp, output_bias):
+def class_dnn_model_builder(n_hidden_layers = 1, n_units = [32], activation = 'relu', kernel_regularizer='l2', learning_rate = 0.001, output_bias = None):
     """ Builds and compiles a classification DNN model"""
+
+    # Check unit and layer requirements
+    if len(n_units) > 1 and len(n_units) != (n_hidden_layers + 1):
+        return print('[N_units] and n_layers must be equal unless [n_units] is 1 (all layers have same n_units).')
     
     # Transform output bias
     if output_bias is not None:
         output_bias = tf.keras.initializers.Constant(output_bias)
-    
-    # Define unit optimization
-    if hp is not None:
-        hp_units = hp.Int('units', min_value=32, max_value=512, step=64)
-    else:
-        hp_units = 32
 
     # Define sequential model
     model = keras.Sequential()
-
-    # Define layer optimizations
-    if hp is not None:
-        hp_layers = hp.Int('n_layers', 2, 8)
-    else:
-        hp_layers = 5
     
     # Loop to create layers
-    for i in range(hp_layers):
-        model.add(
-            layers.Dense(
-            units=hp_units,
-            kernel_regularizer='l2',
-            activation='relu'
+    # Same n_units for each layer
+    if len(n_units) == 1:
+        for i in range(n_hidden_layers + 1):
+            model.add(
+                layers.Dense(
+                units=n_units[0],
+                kernel_regularizer=kernel_regularizer,
+                activation=activation
+                )
             )
-        )
-        model.add(
-            layers.Dropout(0.5)
-        )
+    # Variable number of units for each layer
+    else:
+        for i in range(n_hidden_layers + 1):
+            model.add(
+                layers.Dense(
+                    units=n_units[i],
+                    kernel_regularizer=kernel_regularizer,
+                    activation=activation
+                )
+            )
+    
+    # Add single dropout
+    model.add(layers.Dropout(0.5))
     
     # Define output layer
     model.add(
         layers.Dense(1, activation='sigmoid', bias_initializer=output_bias)
     )
 
-    # Define learning rate optimization
-    if hp is not None:
-        hp_learning_rate = hp.Choice('learning_rate', values=[0.001, 0.0001, 0.00001])
-    else:
-        hp_learning_rate = 0.001
-
     # Compile model
     model.compile(
         loss=losses.BinaryCrossentropy(),
-        optimizer=optimizers.Adagrad(learning_rate=hp_learning_rate),
+        optimizer=optimizers.Adagrad(learning_rate=learning_rate),
         metrics=[
             metrics.BinaryAccuracy(name='binary_accuracy'),
-            tfa.metrics.F1Score(name='f1_score', num_classes = 2),
-            tfa.metrics.CohenKappa(name='cohen_kappa', num_classes = 2),
-            tfa.metrics.MatthewsCorrelationCoefficient(name='matthews', num_classes = 2),
             metrics.AUC(name='AUC'),
             ]
         )
